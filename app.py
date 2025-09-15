@@ -230,7 +230,7 @@ class AlertQueue:
                                     logger.warning(f"⚠️ No run_coroutine method available for user {user_id}")
                             except Exception as send_error:
                                 logger.error(f"❌ Failed to send alert message: {str(send_error)}")
-                        
+
                         # تشغيل في thread منفصل
                         threading.Thread(target=send_alert_async, daemon=True).start()
 
@@ -468,57 +468,6 @@ class TelegramClientManager:
             except Exception as emit_error:
                 logger.error(f"❌ Failed to emit immediate alert: {str(emit_error)}")
 
-def get_all_users_operations_status():
-    """الحصول على حالة العمليات لجميع المستخدمين"""
-    operations_status = {}
-    
-    with USERS_LOCK:
-        for user_id, user_data in USERS.items():
-            if user_id in PREDEFINED_USERS:
-                operations_status[user_id] = {
-                    'name': PREDEFINED_USERS[user_id]['name'],
-                    'connected': user_data.get('connected', False),
-                    'authenticated': user_data.get('authenticated', False),
-                    'is_running': user_data.get('is_running', False),
-                    'monitoring_active': user_data.get('monitoring_active', False),
-                    'stats': user_data.get('stats', {"sent": 0, "errors": 0})
-                }
-    
-    return operations_status
-
-def notify_user_about_background_operations(user_id):
-    """إشعار المستخدم بالعمليات التي تعمل في الخلفية"""
-    try:
-        active_operations = []
-        
-        with USERS_LOCK:
-            for uid, user_data in USERS.items():
-                if uid != user_id and uid in PREDEFINED_USERS:
-                    if user_data.get('is_running', False) or user_data.get('monitoring_active', False):
-                        active_operations.append({
-                            'user_name': PREDEFINED_USERS[uid]['name'],
-                            'operations': []
-                        })
-                        
-                        if user_data.get('monitoring_active', False):
-                            active_operations[-1]['operations'].append('مراقبة نشطة')
-                        if user_data.get('is_running', False):
-                            active_operations[-1]['operations'].append('إرسال مجدول')
-        
-        if active_operations:
-            operations_text = []
-            for op in active_operations:
-                operations_text.append(f"• {op['user_name']}: {', '.join(op['operations'])}")
-            
-            socketio.emit('log_update', {
-                "message": f"📊 العمليات النشطة في الخلفية:\n" + "\n".join(operations_text)
-            }, to=user_id)
-            
-    except Exception as e:
-        logger.error(f"Error notifying about background operations: {str(e)}")
-
-
-
             logger.info(f"✅ Keyword alert triggered for user {self.user_id}: '{keyword}' in {group_identifier}")
 
         except Exception as e:
@@ -545,6 +494,77 @@ def notify_user_about_background_operations(user_id):
         self.stop_flag.set()
         if self.thread:
             self.thread.join(timeout=5)
+
+def get_all_users_operations_status():
+    """الحصول على حالة العمليات لجميع المستخدمين"""
+    operations_status = {}
+
+    with USERS_LOCK:
+        for user_id, user_data in USERS.items():
+            if user_id in PREDEFINED_USERS:
+                operations_status[user_id] = {
+                    'name': PREDEFINED_USERS[user_id]['name'],
+                    'connected': user_data.get('connected', False),
+                    'authenticated': user_data.get('authenticated', False),
+                    'is_running': user_data.get('is_running', False),
+                    'monitoring_active': user_data.get('monitoring_active', False),
+                    'stats': user_data.get('stats', {"sent": 0, "errors": 0})
+                }
+
+    return operations_status
+
+def notify_user_about_background_operations(user_id):
+    """إشعار المستخدم بالعمليات التي تعمل في الخلفية"""
+    try:
+        active_operations = []
+
+        with USERS_LOCK:
+            for uid, user_data in USERS.items():
+                if uid != user_id and uid in PREDEFINED_USERS:
+                    if user_data.get('is_running', False) or user_data.get('monitoring_active', False):
+                        active_operations.append({
+                            'user_name': PREDEFINED_USERS[uid]['name'],
+                            'operations': []
+                        })
+
+                        if user_data.get('monitoring_active', False):
+                            active_operations[-1]['operations'].append('مراقبة نشطة')
+                        if user_data.get('is_running', False):
+                            active_operations[-1]['operations'].append('إرسال مجدول')
+
+        if active_operations:
+            operations_text = []
+            for op in active_operations:
+                operations_text.append(f"• {op['user_name']}: {', '.join(op['operations'])}")
+
+            socketio.emit('log_update', {
+                "message": f"📊 العمليات النشطة في الخلفية:\n" + "\n".join(operations_text)
+            }, to=user_id)
+
+    except Exception as e:
+        logger.error(f"Error notifying about background operations: {str(e)}")
+
+def update_monitoring_settings(self, keywords, groups):
+    """تحديث إعدادات المراقبة - فقط الكلمات المفتاحية (المجموعات للإرسال فقط)"""
+    self.monitored_keywords = [k.strip() for k in keywords if k.strip()]
+    # ⚠️ لا نحفظ مجموعات المراقبة - نراقب كل شيء
+    # نحفظ مجموعات الإرسال منفصلة في الإعدادات العادية
+
+    logger.info(f"Updated monitoring settings for {self.user_id}: {len(self.monitored_keywords)} keywords - مراقبة شاملة لكامل الحساب")
+
+def run_coroutine(self, coro):
+    """تشغيل coroutine في event loop الخاص بالعميل"""
+    if not self.loop:
+        raise Exception("Event loop not initialized")
+
+    future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+    return future.result(timeout=30)
+
+def stop(self):
+    """إيقاف العميل"""
+    self.stop_flag.set()
+    if self.thread:
+        self.thread.join(timeout=5)
 
 # =========================== 
 # مدير التليجرام الرئيسي
@@ -657,14 +677,14 @@ class TelegramManager:
         except Exception as e:
             error_message = str(e)
             logger.error(f"Setup error for {user_id}: {error_message}")
-            
+
             # معالجة خاصة لخطأ ResendCodeRequest
             if "ResendCodeRequest" in error_message or "all available options" in error_message:
                 socketio.emit('log_update', {
                     "message": "⚠️ تم استنفاد محاولات إرسال الكود. يرجى الانتظار قليلاً ثم المحاولة مرة أخرى"
                 }, to=user_id)
                 return {"status": "error", "message": "⚠️ يرجى الانتظار قبل طلب كود جديد"}
-            
+
             socketio.emit('log_update', {
                 "message": f"❌ خطأ في الإعداد: {error_message}"
             }, to=user_id)
@@ -948,18 +968,18 @@ class TelegramManager:
                                         caption="📷 مجموعة صور"
                                     )
                                 )
-                                
+
                                 # معالجة النتائج
                                 if hasattr(media_result, '__iter__'):
                                     for result in media_result:
                                         results.append(result.id)
                                 else:
                                     results.append(media_result.id)
-                                    
+
                                 logger.info(f"Successfully sent {len(image_paths)} images as album to {entity}")
                             except Exception as album_error:
                                 logger.warning(f"Failed to send as album, sending individually: {str(album_error)}")
-                                
+
                                 # إرسال النص أولاً إذا كان موجوداً
                                 if message and message.strip():
                                     text_result = client_manager.run_coroutine(
@@ -1019,10 +1039,13 @@ def monitoring_worker(user_id):
 
     try:
         with USERS_LOCK:
-            if user_id in USERS:
-                USERS[user_id]['monitoring_active'] = True
-                client_manager = USERS[user_id].get('client_manager')
-                settings = USERS[user_id]['settings']
+            if user_id not in USERS:
+                logger.error(f"No user data found for {user_id}")
+                return
+
+            USERS[user_id]['monitoring_active'] = True
+            client_manager = USERS[user_id].get('client_manager')
+            settings = USERS[user_id]['settings']
 
         if not client_manager:
             logger.error(f"No client manager for user {user_id}")
@@ -1034,6 +1057,9 @@ def monitoring_worker(user_id):
 
         if hasattr(client_manager, 'update_monitoring_settings'):
             client_manager.update_monitoring_settings(watch_words, send_groups)
+        else:
+            logger.warning(f"Client manager for {user_id} does not have update_monitoring_settings method.")
+
 
         # إرسال إشعار بدء المراقبة
         if watch_words:
@@ -1048,40 +1074,12 @@ def monitoring_worker(user_id):
         # الحفاظ على المراقبة نشطة
         consecutive_errors = 0
 
-@app.route("/api/get_all_users_status", methods=["GET"])
-def api_get_all_users_status():
-    """الحصول على حالة جميع المستخدمين وعملياتهم"""
-    try:
-        all_status = get_all_users_operations_status()
-        
-        # إضافة معلومات إضافية
-        summary = {
-            'total_users': len(all_status),
-            'active_users': len([u for u in all_status.values() if u['connected']]),
-            'running_operations': len([u for u in all_status.values() if u['is_running']]),
-            'monitoring_active': len([u for u in all_status.values() if u['monitoring_active']])
-        }
-        
-        return jsonify({
-            "success": True,
-            "users_status": all_status,
-            "summary": summary
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting all users status: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": f"❌ خطأ: {str(e)}"
-        })
-
-
         max_consecutive_errors = 5
 
         while True:
             with USERS_LOCK:
-                if user_id not in USERS or not USERS[user_id]['is_running']:
-                    logger.info(f"Stopping monitoring for user {user_id}")
+                if user_id not in USERS or not USERS[user_id].get('is_running', False):
+                    logger.info(f"Stopping monitoring for user {user_id} as is_running is False")
                     break
 
                 user_data = USERS[user_id].copy()
@@ -1089,7 +1087,7 @@ def api_get_all_users_status():
 
             try:
                 # تنفيذ الإرسال المجدول إذا كان مطلوب
-                settings = user_data['settings']
+                settings = user_data.get('settings', {})
                 send_type = settings.get('send_type', 'manual')
                 current_time = time.time()
 
@@ -1130,13 +1128,17 @@ def api_get_all_users_status():
                     socketio.emit('log_update', {
                         "message": f"❌ تم إيقاف المراقبة بسبب تكرار الأخطاء ({consecutive_errors})"
                     }, to=user_id)
+                    # إيقاف المراقبة إذا تجاوزنا الحد الأقصى للأخطاء
+                    with USERS_LOCK:
+                        if user_id in USERS:
+                            USERS[user_id]['is_running'] = False
                     break
 
             # فترة انتظار مناسبة
             time.sleep(10)
 
     except Exception as e:
-        logger.error(f"Monitoring worker error for {user_id}: {str(e)}")
+        logger.error(f"Monitoring worker top-level error for {user_id}: {str(e)}")
     finally:
         with USERS_LOCK:
             if user_id in USERS:
@@ -1219,12 +1221,12 @@ def handle_connect():
             session.permanent = True
 
         user_id = session['user_id']
-        
+
         # التأكد من أن المستخدم ضمن المستخدمين المحددين مسبقاً
         if user_id not in PREDEFINED_USERS:
             user_id = "user_1"  # الافتراضي إذا لم يكن مستخدماً صحيحاً
             session['user_id'] = user_id
-            
+
         join_room(user_id)
         logger.info(f"User {user_id} ({PREDEFINED_USERS[user_id]['name']}) connected via socket")
 
@@ -1235,20 +1237,20 @@ def handle_connect():
             'user_name': PREDEFINED_USERS[user_id]['name'],
             'timestamp': time.strftime('%H:%M:%S')
         })
-        
+
         # إرسال قائمة المستخدمين المتاحين
         emit('users_list', {
             'current_user': user_id,
             'users': PREDEFINED_USERS
         })
-        
+
         # إشعار بالعمليات النشطة في الخلفية
         notify_user_about_background_operations(user_id)
-        
+
         # إرسال حالة جميع المستخدمين
         all_status = get_all_users_operations_status()
         emit('all_users_status', all_status)
-        
+
     except Exception as e:
         logger.error(f"Connection error: {str(e)}")
         emit('connection_error', {'message': str(e)})
@@ -1259,37 +1261,37 @@ def handle_switch_user(data):
     """التبديل إلى مستخدم مختلف"""
     try:
         new_user_id = data.get('user_id')
-        
+
         if not new_user_id or new_user_id not in PREDEFINED_USERS:
             emit('error', {'message': 'مستخدم غير صحيح'})
             return
-            
+
         # مغادرة الغرفة القديمة بأمان
         old_user_id = session.get('user_id', 'user_1')
         try:
             leave_room(old_user_id)
         except Exception as leave_error:
             logger.warning(f"Error leaving room {old_user_id}: {str(leave_error)}")
-        
+
         # تحديث الجلسة
         session['user_id'] = new_user_id
         session.permanent = True
-        
+
         # الانضمام للغرفة الجديدة بأمان
         try:
             join_room(new_user_id)
         except Exception as join_error:
             logger.warning(f"Error joining room {new_user_id}: {str(join_error)}")
-        
+
         logger.info(f"User switched from {old_user_id} to {new_user_id}")
-        
+
         # إرسال تأكيد التبديل
         emit('user_switched', {
             'current_user': new_user_id,
             'user_name': PREDEFINED_USERS[new_user_id]['name'],
             'message': f"تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']}"
         })
-        
+
         # إرسال حالة المستخدم الجديد
         try:
             with USERS_LOCK:
@@ -1300,11 +1302,11 @@ def handle_switch_user(data):
                     awaiting_code = user_data.get('awaiting_code', False)
                     awaiting_password = user_data.get('awaiting_password', False)
                     is_running = user_data.get('is_running', False)
-                    
+
                     emit('connection_status', {
                         "status": "connected" if connected else "disconnected"
                     })
-                    
+
                     emit('login_status', {
                         "logged_in": authenticated,
                         "connected": connected,
@@ -1312,7 +1314,7 @@ def handle_switch_user(data):
                         "awaiting_password": awaiting_password,
                         "is_running": is_running
                     })
-                    
+
                     # إرسال إعدادات المستخدم
                     settings = load_settings(new_user_id)
                     emit('user_settings', settings)
@@ -1328,7 +1330,7 @@ def handle_switch_user(data):
                     })
         except Exception as status_error:
             logger.error(f"Error sending user status: {str(status_error)}")
-                
+
     except Exception as e:
         logger.error(f"Error switching user: {str(e)}")
         emit('error', {'message': f'خطأ في التبديل: {str(e)}'})
@@ -1385,7 +1387,7 @@ def index():
         session['user_id'] = "user_1"
 
     user_id = session['user_id']
-    
+
     # تحميل إعدادات المستخدم الحالي (قد تكون فارغة للمستخدمين الجدد)
     settings = load_settings(user_id)
     connection_status = "disconnected"
@@ -1408,7 +1410,7 @@ def index():
                 'monitoring_active': False,
                 'event_handlers_registered': False
             }
-        
+
         # الحصول على حالة الاتصال للمستخدم الحالي
         user_data = USERS[user_id]
         connected = user_data.get('connected', False)
@@ -1526,7 +1528,7 @@ def api_save_login():
         })
 
     new_phone = data.get('phone')
-    
+
     # التحقق من وجود user_id في الجلسة
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
@@ -1535,27 +1537,27 @@ def api_save_login():
         # التحقق من تغيير رقم الهاتف
         current_user_id = session['user_id']
         current_settings = load_settings(current_user_id)
-        
+
         # إذا تغير رقم الهاتف، إنشاء جلسة جديدة
         if current_settings.get('phone') and current_settings.get('phone') != new_phone:
             logger.info(f"Phone number changed from {current_settings.get('phone')} to {new_phone}, creating new session")
-            
+
             # إيقاف الجلسة الحالية إذا كانت نشطة
             with USERS_LOCK:
                 if current_user_id in USERS:
                     if USERS[current_user_id].get('is_running'):
                         USERS[current_user_id]['is_running'] = False
-                    
+
                     client_manager = USERS[current_user_id].get('client_manager')
                     if client_manager:
                         client_manager.stop()
-                    
+
                     del USERS[current_user_id]
-            
+
             # إنشاء user_id جديد
             session['user_id'] = str(uuid.uuid4())
             session.permanent = True
-            
+
             socketio.emit('log_update', {
                 "message": f"🔄 تم إنشاء جلسة جديدة لرقم {new_phone}"
             }, to=session['user_id'])
@@ -1587,17 +1589,17 @@ def api_save_login():
                 if existing_user_id != user_id and user_data['settings'].get('phone') == settings['phone']:
                     users_to_remove.append(existing_user_id)
                     logger.info(f"Removing duplicate session for phone {settings['phone']}: {existing_user_id}")
-            
+
             for old_user_id in users_to_remove:
                 if USERS[old_user_id].get('is_running'):
                     USERS[old_user_id]['is_running'] = False
-                
+
                 client_manager = USERS[old_user_id].get('client_manager')
                 if client_manager:
                     client_manager.stop()
-                
+
                 del USERS[old_user_id]
-            
+
             # إنشاء الجلسة الجديدة
             USERS[user_id] = {
                 'client_manager': None,
@@ -1815,7 +1817,7 @@ def api_user_logout():
 
     try:
         logger.info(f"User {user_id} logging out...")
-        
+
         with USERS_LOCK:
             if user_id in USERS:
                 # إيقاف العميل والمراقبة
@@ -1823,18 +1825,18 @@ def api_user_logout():
                 if client_manager:
                     try:
                         # إيقاف المراقبة أولاً
-                        if USERS[user_id].get('is_running', False):
+                        if USERS[user_id].get('is_running'):
                             USERS[user_id]['is_running'] = False
-                            
+
                         # قطع الاتصال وإيقاف العميل
                         if hasattr(client_manager, 'client') and client_manager.client:
                             client_manager.client.disconnect()
                             logger.info(f"Client disconnected for user {user_id}")
-                            
+
                         # إيقاف thread إذا كان يعمل
                         if hasattr(client_manager, 'stop'):
                             client_manager.stop()
-                            
+
                     except Exception as e:
                         logger.error(f"خطأ في إغلاق العميل للمستخدم {user_id}: {e}")
 
@@ -1850,7 +1852,7 @@ def api_user_logout():
                 logger.info(f"Session file removed for {user_id}")
             except Exception as e:
                 logger.error(f"خطأ في حذف ملف الجلسة: {e}")
-        
+
         # مسح إعدادات المستخدم (اختياري - قد تريد الاحتفاظ بها)
         settings_file = os.path.join(SESSIONS_DIR, f"{user_id}.json")
         if os.path.exists(settings_file):
@@ -1871,11 +1873,11 @@ def api_user_logout():
         socketio.emit('log_update', {
             "message": "🚪 تم تسجيل الخروج وإنهاء جلسة التليجرام"
         }, to=user_id)
-        
+
         socketio.emit('connection_status', {
             "status": "disconnected"
         }, to=user_id)
-        
+
         socketio.emit('login_status', {
             "logged_in": False,
             "connected": False,
@@ -1886,7 +1888,7 @@ def api_user_logout():
 
         # لا نمسح session.clear() بل نحتفظ بهوية المستخدم
         # session.clear()  - لا نستخدم هذا في النظام الجديد
-        
+
         logger.info(f"User {user_id} logged out successfully")
 
         return jsonify({
@@ -1907,15 +1909,15 @@ def api_switch_user():
     try:
         data = request.get_json()
         new_user_id = data.get('user_id')
-        
+
         if not new_user_id or new_user_id not in PREDEFINED_USERS:
             return jsonify({
                 "success": False,
                 "message": "❌ مستخدم غير صحيح"
             })
-        
+
         old_user_id = session.get('user_id', 'user_1')
-        
+
         # الحفاظ على العمليات المستمرة للمستخدم القديم
         # لا نوقف العمليات الجارية، فقط نحفظ الإعدادات
         if old_user_id in USERS:
@@ -1923,13 +1925,13 @@ def api_switch_user():
             if current_settings:
                 save_settings(old_user_id, current_settings)
                 logger.info(f"✅ Settings saved for user {old_user_id} - Operations continue running")
-        
+
         # التأكد من وجود بيانات المستخدم الجديد
         with USERS_LOCK:
             if new_user_id not in USERS:
                 # تحميل الإعدادات المحفوظة للمستخدم الجديد
                 saved_settings = load_settings(new_user_id)
-                
+
                 # إنشاء بيانات للمستخدم الجديد مع الإعدادات المحفوظة
                 USERS[new_user_id] = {
                     'client_manager': None,
@@ -1945,7 +1947,7 @@ def api_switch_user():
                     'monitoring_active': False,
                     'event_handlers_registered': False
                 }
-                
+
                 # التحقق من وجود جلسة محفوظة للمستخدم الجديد
                 session_file = os.path.join(SESSIONS_DIR, f"{new_user_id}_session.session")
                 if os.path.exists(session_file) and saved_settings.get('phone'):
@@ -1956,19 +1958,19 @@ def api_switch_user():
                 # إعادة تحميل الإعدادات للمستخدم الموجود
                 saved_settings = load_settings(new_user_id)
                 USERS[new_user_id]['settings'].update(saved_settings)
-        
+
         # تحديث الجلسة فقط للواجهة
         session['user_id'] = new_user_id
         session.permanent = True
-        
+
         logger.info(f"✅ User switched from {old_user_id} to {new_user_id} - All operations remain active")
-        
+
         # عرض حالة العمليات المستمرة
         active_operations_summary = get_all_users_operations_status()
-        
+
         # إرسال الإعدادات الخاصة بالمستخدم الجديد
         socketio.emit('user_settings', USERS[new_user_id]['settings'], to=new_user_id)
-        
+
         return jsonify({
             "success": True,
             "message": f"✅ تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']} - العمليات مستمرة للجميع",
@@ -1981,7 +1983,7 @@ def api_switch_user():
             "settings": USERS[new_user_id]['settings'],
             "active_operations": active_operations_summary
         })
-        
+
     except Exception as e:
         logger.error(f"Error in user switching API: {str(e)}")
         return jsonify({
@@ -2168,28 +2170,28 @@ def api_send_now():
         try:
             import base64
             import tempfile
-            
+
             for img_data in images:
                 # استخراج البيانات من Base64
                 base64_data = img_data['data'].split(',')[1]  # إزالة البادئة
                 image_bytes = base64.b64decode(base64_data)
-                
+
                 # إنشاء ملف مؤقت
                 temp_file = tempfile.NamedTemporaryFile(delete=False, 
                                                      suffix=f".{img_data['type'].split('/')[-1]}")
                 temp_file.write(image_bytes)
                 temp_file.flush()
-                
+
                 image_files.append({
                     'path': temp_file.name,
                     'name': img_data['name'],
                     'type': img_data['type']
                 })
-                
+
             socketio.emit('log_update', {
                 "message": f"📷 تم تحضير {len(image_files)} صورة للإرسال"
             }, to=user_id)
-            
+
         except Exception as e:
             logger.error(f"Error processing images: {str(e)}")
             return jsonify({
@@ -2314,7 +2316,7 @@ def api_get_login_status():
             client_manager = user_data.get('client_manager')
             authenticated = user_data.get('authenticated', False)
             connected = user_data.get('connected', False)
-            
+
             # تحقق إضافي من وجود جلسة محفوظة إذا لم يكن authenticated
             if not authenticated and 'settings' in user_data and 'phone' in user_data['settings']:
                 session_file = os.path.join(SESSIONS_DIR, f"{user_id}_session.session")
@@ -2325,7 +2327,7 @@ def api_get_login_status():
                     # تحديث حالة المستخدم
                     USERS[user_id]['authenticated'] = True
                     USERS[user_id]['connected'] = True
-            
+
             return jsonify({
                 "logged_in": authenticated, 
                 "connected": connected,
@@ -2357,16 +2359,16 @@ def api_get_user_info():
 def api_reset_login():
     """إعادة تعيين جلسة تسجيل الدخول للمستخدم الحالي"""
     user_id = session.get('user_id', 'user_1')
-    
+
     if user_id not in PREDEFINED_USERS:
         return jsonify({
             "success": False,
             "message": "❌ مستخدم غير صحيح"
         })
-    
+
     try:
         logger.info(f"Resetting login for user {user_id}")
-        
+
         with USERS_LOCK:
             if user_id in USERS:
                 # إيقاف المراقبة إذا كانت تعمل
@@ -2406,7 +2408,7 @@ def api_reset_login():
         socketio.emit('connection_status', {
             "status": "disconnected"
         }, to=user_id)
-        
+
         socketio.emit('login_status', {
             "logged_in": False,
             "connected": False,
@@ -2416,12 +2418,12 @@ def api_reset_login():
         }, to=user_id)
 
         logger.info(f"Login reset completed for user {user_id}")
-        
+
         return jsonify({
             "success": True, 
             "message": f"✅ تم إعادة تعيين جلسة {PREDEFINED_USERS[user_id]['name']} بنجاح"
         })
-        
+
     except Exception as e:
         logger.error(f"Error resetting login for {user_id}: {str(e)}")
         return jsonify({
@@ -2510,33 +2512,33 @@ def extract_telegram_links(text):
     """استخراج روابط التليجرام من النص مع التنظيف والفلترة"""
     if not text:
         return []
-    
+
     # أنماط شاملة لروابط التليجرام
     patterns = [
         # روابط عادية
         r'https?://t\.me/([a-zA-Z0-9_]+)(?:/\d+)?',           # https://t.me/channel أو https://t.me/channel/123
         r'https?://telegram\.me/([a-zA-Z0-9_]+)(?:/\d+)?',    # https://telegram.me/channel
-        
+
         # روابط الدعوة
         r'https?://t\.me/\+([a-zA-Z0-9_\-]+)',                # https://t.me/+inviteHash
         r'https?://telegram\.me/\+([a-zA-Z0-9_\-]+)',         # https://telegram.me/+inviteHash
-        
+
         # روابط بدون بروتوكول
         r't\.me/([a-zA-Z0-9_]+)',                             # t.me/channel
         r't\.me/\+([a-zA-Z0-9_\-]+)',                        # t.me/+inviteHash
         r'telegram\.me/([a-zA-Z0-9_]+)',                      # telegram.me/channel
-        
+
         # أسماء المستخدمين والقنوات
         r'@([a-zA-Z0-9_]{5,})',                              # @channel (أكثر من 4 أحرف)
     ]
-    
+
     found_links = set()
-    
+
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for match in matches:
             clean_match = match if isinstance(match, str) else match[0] if match else ''
-            
+
             # تنسيق الرابط
             if pattern.startswith(r'@'):
                 # اسم المستخدم
@@ -2552,16 +2554,16 @@ def extract_telegram_links(text):
                 clean_link = f"https://t.me/{clean_match.split('/')[-1]}"
             else:
                 clean_link = clean_match
-            
+
             # التحقق من صحة الرابط
             if clean_link and len(clean_link) > 15:  # على الأقل https://t.me/x
                 # إزالة أي معاملات إضافية
                 clean_link = clean_link.split('?')[0].split('#')[0]
                 found_links.add(clean_link)
-    
+
     # تحويل إلى قائمة مع ترتيب
     links_list = sorted(list(found_links))
-    
+
     # إنشاء كائنات الروابط مع معلومات إضافية
     result_links = []
     for link in links_list:
@@ -2571,7 +2573,7 @@ def extract_telegram_links(text):
             'username': username,
             'type': 'invite' if '+' in link else 'channel'
         })
-    
+
     return result_links
 
 async def join_telegram_group(client, group_link):
@@ -2698,13 +2700,13 @@ def api_join_group():
     """الانضمام لمجموعة واحدة"""
     try:
         user_id = session.get('user_id', 'user_1')
-        
+
         if user_id not in PREDEFINED_USERS:
             return jsonify({
                 "success": False,
                 "message": "❌ مستخدم غير صحيح"
             })
-            
+
         data = request.json
 
         if not data or not data.get('group_link'):
@@ -2719,7 +2721,7 @@ def api_join_group():
             group_link = group_link_raw.get('url', '') or group_link_raw.get('link', '') or str(group_link_raw)
         else:
             group_link = str(group_link_raw)
-        
+
         group_link = group_link.strip()
 
         with USERS_LOCK:
@@ -2760,13 +2762,13 @@ def api_start_auto_join():
     """بدء الانضمام التلقائي المتعدد للمجموعات"""
     try:
         user_id = session.get('user_id', 'user_1')
-        
+
         if user_id not in PREDEFINED_USERS:
             return jsonify({
                 "success": False,
                 "message": "❌ مستخدم غير صحيح"
             })
-            
+
         data = request.json
         if not data or not data.get('links'):
             return jsonify({
@@ -2776,7 +2778,7 @@ def api_start_auto_join():
 
         links = data.get('links', [])
         delay = data.get('delay', 3)  # تأخير افتراضي 3 ثواني
-        
+
         if not links:
             return jsonify({
                 "success": False,
@@ -2799,16 +2801,16 @@ def api_start_auto_join():
 
         # بدء عملية الانضمام التلقائي في thread منفصل
         import threading
-        
+
         def auto_join_worker():
             success_count = 0
             fail_count = 0
             already_joined_count = 0
-            
+
             socketio.emit('log_update', {
                 "message": f"🚀 بدء الانضمام التلقائي لـ {len(links)} مجموعة..."
             }, to=user_id)
-            
+
             for i, link_obj in enumerate(links):
                 try:
                     # الحصول على الرابط
@@ -2816,21 +2818,21 @@ def api_start_auto_join():
                         group_link = link_obj.get('url', '') or link_obj.get('link', '') or str(link_obj)
                     else:
                         group_link = str(link_obj)
-                    
+
                     group_link = group_link.strip()
-                    
+
                     # إرسال حالة التقدم
                     socketio.emit('join_progress', {
                         'current': i + 1,
                         'total': len(links),
                         'link': group_link
                     }, to=user_id)
-                    
+
                     # محاولة الانضمام
                     result = client_manager.run_coroutine(
                         join_telegram_group(client_manager.client, group_link)
                     )
-                    
+
                     if result['success']:
                         if result.get('already_joined', False):
                             already_joined_count += 1
@@ -2847,24 +2849,24 @@ def api_start_auto_join():
                         socketio.emit('log_update', {
                             "message": f"❌ فشل: {group_link} - {result['message']}"
                         }, to=user_id)
-                    
+
                     # تحديث الإحصائيات
                     socketio.emit('join_stats', {
                         'success': success_count,
                         'fail': fail_count,
                         'already_joined': already_joined_count
                     }, to=user_id)
-                    
+
                     # تأخير بين المجموعات لتجنب flood
                     if i < len(links) - 1:  # لا نؤخر بعد آخر مجموعة
                         time.sleep(delay)
-                        
+
                 except Exception as e:
                     fail_count += 1
                     socketio.emit('log_update', {
                         "message": f"❌ خطأ في {group_link}: {str(e)}"
                     }, to=user_id)
-            
+
             # إرسال النتيجة النهائية
             socketio.emit('auto_join_completed', {
                 'success': success_count,
@@ -2872,7 +2874,7 @@ def api_start_auto_join():
                 'already_joined': already_joined_count,
                 'total': len(links)
             }, to=user_id)
-            
+
             socketio.emit('log_update', {
                 "message": f"🎉 انتهى الانضمام التلقائي! النجح: {success_count}, فشل: {fail_count}, منضم مسبقاً: {already_joined_count}"
             }, to=user_id)
@@ -2908,38 +2910,38 @@ def extract_telegram_links(text):
     """استخراج روابط التليجرام من النص"""
     if not text:
         return []
-    
+
     # أنماط الروابط المختلفة (شامل وقوي)
     patterns = [
         # روابط عادية
         r'https?://t\.me/([a-zA-Z0-9_]+)',           # https://t.me/channel
         r'https?://telegram\.me/([a-zA-Z0-9_]+)',    # https://telegram.me/channel
-        
+
         # روابط الدعوة (invite links)
         r'https?://t\.me/\+([a-zA-Z0-9_\-]+)',       # https://t.me/+inviteHash
         r'https?://telegram\.me/\+([a-zA-Z0-9_\-]+)', # https://telegram.me/+inviteHash
-        
+
         # روابط الرسائل في القنوات الخاصة
         r'https?://t\.me/c/(\d+)/(\d+)',             # https://t.me/c/channelid/messageid
         r'https?://telegram\.me/c/(\d+)/(\d+)',      # https://telegram.me/c/channelid/messageid
-        
+
         # روابط الرسائل في القنوات العامة
         r'https?://t\.me/([a-zA-Z0-9_]+)/(\d+)',     # https://t.me/channel/messageid
         r'https?://telegram\.me/([a-zA-Z0-9_]+)/(\d+)', # https://telegram.me/channel/messageid
-        
+
         # ذكر المستخدمين والقنوات
         r'@([a-zA-Z0-9_]+)',                         # @channel
-        
+
         # روابط بدون بروتوكول
         r't\.me/([a-zA-Z0-9_]+)',                    # t.me/channel
         r't\.me/\+([a-zA-Z0-9_\-]+)',               # t.me/+inviteHash
         r'telegram\.me/([a-zA-Z0-9_]+)',             # telegram.me/channel
         r'telegram\.me/\+([a-zA-Z0-9_\-]+)',        # telegram.me/+inviteHash
     ]
-    
+
     links = []
     seen_urls = set()
-    
+
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for match in matches:
@@ -2960,7 +2962,7 @@ def extract_telegram_links(text):
                         username = match[0]
                     else:
                         clean_link = f"https://t.me/{match[0]}"
-                        username = match[0]
+                        username = match
             else:
                 # تطابق واحد
                 if match.startswith('+'):
@@ -2975,7 +2977,7 @@ def extract_telegram_links(text):
                     # قناة أو مستخدم عادي
                     clean_link = f"https://t.me/{match}"
                     username = match
-            
+
             # تجنب التكرار
             if clean_link not in seen_urls:
                 seen_urls.add(clean_link)
@@ -2984,7 +2986,7 @@ def extract_telegram_links(text):
                     'original_text': text[:200] + ('...' if len(text) > 200 else ''),
                     'username': username.replace('@', '') if isinstance(username, str) else str(username)
                 })
-    
+
     return links
 
 @app.route("/api/search_my_links", methods=["POST"])
@@ -2999,7 +3001,7 @@ def api_search_my_links():
 
         user_id = session['user_id']
         data = request.json
-        
+
         # الحصول على عدد الأيام (افتراضي: شهرين)
         days = data.get('days', 60)
         if days <= 0 or days > 365:  # حد أقصى سنة واحدة
@@ -3023,7 +3025,7 @@ def api_search_my_links():
 
         # حساب التاريخ المحدد
         since_date = datetime.now() - timedelta(days=days)
-        
+
         # تشغيل البحث
         result = client_manager.run_coroutine(
             search_links_in_chats(client_manager.client, since_date)
@@ -3047,7 +3049,7 @@ def api_search_my_links():
 async def search_links_in_chats(client, since_date):
     """البحث عن الروابط في جميع المحادثات"""
     found_links = []
-    
+
     try:
         # الحصول على جميع المحادثات
         async for dialog in client.iter_dialogs():
@@ -3055,9 +3057,9 @@ async def search_links_in_chats(client, since_date):
                 # تخطي المحادثات المحذوفة
                 if not dialog.entity:
                     continue
-                
+
                 chat_title = dialog.title or "محادثة غير معروفة"
-                
+
                 # البحث في رسائل هذه المحادثة
                 async for message in client.iter_messages(
                     dialog, 
@@ -3067,11 +3069,11 @@ async def search_links_in_chats(client, since_date):
                     if message.text:
                         # استخراج الروابط من النص
                         links = extract_telegram_links(message.text)
-                        
+
                         for link in links:
                             # الحصول على معلومات القناة إن أمكن
                             title = await get_channel_title(client, link['username'])
-                            
+
                             found_links.append({
                                 'url': link['url'],
                                 'title': title or link['username'],
@@ -3079,30 +3081,30 @@ async def search_links_in_chats(client, since_date):
                                 'chat_title': chat_title,
                                 'original_text': link['original_text']
                             })
-                
+
                 # حد أقصى للمحادثات المفحوصة لتجنب الإبطاء
                 if len(found_links) > 500:
                     break
-                    
+
             except Exception as e:
                 logger.warning(f"تخطي محادثة بسبب خطأ: {str(e)}")
                 continue
-    
+
     except Exception as e:
         logger.error(f"خطأ في البحث عن الروابط: {str(e)}")
-    
+
     # إزالة الروابط المكررة وترتيبها حسب التاريخ
     unique_links = []
     seen_urls = set()
-    
+
     for link in found_links:
         if link['url'] not in seen_urls:
             seen_urls.add(link['url'])
             unique_links.append(link)
-    
+
     # ترتيب حسب التاريخ (الأحدث أولاً)
     unique_links.sort(key=lambda x: x['date'], reverse=True)
-    
+
     return unique_links
 
 async def get_channel_title(client, username):
@@ -3110,7 +3112,7 @@ async def get_channel_title(client, username):
     try:
         if username.startswith('@'):
             username = username[1:]
-            
+
         entity = await client.get_entity(username)
         return entity.title if hasattr(entity, 'title') else username
     except Exception:
@@ -3128,7 +3130,7 @@ def api_search_public_channels():
 
         user_id = session['user_id']
         data = request.json
-        
+
         query = data.get('query', '').strip()
         if not query:
             return jsonify({
@@ -3178,7 +3180,7 @@ def api_search_public_channels():
 async def search_public_telegram(client, query, limit=50):
     """البحث العام في التليجرام"""
     results = []
-    
+
     try:
         # البحث العام باستخدام SearchGlobalRequest
         global_search = await client(SearchGlobalRequest(
@@ -3188,18 +3190,18 @@ async def search_public_telegram(client, query, limit=50):
             offset_id=0,
             limit=limit
         ))
-        
+
         # معالجة النتائج
         for message in global_search.messages:
             if hasattr(message, 'peer_id') and hasattr(message.peer_id, 'channel_id'):
                 # البحث عن القناة في الكيانات
                 channel_id = message.peer_id.channel_id
-                
+
                 for chat in global_search.chats:
                     if hasattr(chat, 'id') and chat.id == channel_id:
                         if isinstance(chat, Channel):
                             username = chat.username if hasattr(chat, 'username') else None
-                            
+
                             result_item = {
                                 'id': str(chat.id),
                                 'title': chat.title,
@@ -3209,11 +3211,11 @@ async def search_public_telegram(client, query, limit=50):
                                 'verified': getattr(chat, 'verified', False),
                                 'scam': getattr(chat, 'scam', False)
                             }
-                            
+
                             # تجنب التكرار
                             if not any(r['id'] == result_item['id'] for r in results):
                                 results.append(result_item)
-        
+
         # بحث إضافي بطرق أخرى إذا كانت النتائج قليلة
         if len(results) < 10:
             try:
@@ -3232,22 +3234,22 @@ async def search_public_telegram(client, query, limit=50):
                                 'verified': getattr(entity, 'verified', False),
                                 'scam': getattr(entity, 'scam', False)
                             }
-                            
+
                             if not any(r['id'] == result_item['id'] for r in results):
                                 results.append(result_item)
                     except Exception:
                         pass
             except Exception:
                 pass
-    
+
     except Exception as e:
         logger.warning(f"خطأ في البحث العام: {str(e)}")
         # محاولة بطريقة بديلة
         pass
-    
+
     # ترتيب النتائج حسب عدد الأعضاء
     results.sort(key=lambda x: x.get('participants_count', 0), reverse=True)
-    
+
     return results[:limit]
 
 # بدء نظام التنبيهات عند تشغيل التطبيق

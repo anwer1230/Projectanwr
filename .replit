@@ -7,7 +7,7 @@ channel = "stable-25_05"
 packages = ["openssl", "unzip"]
 
 [workflows]
-runButton = "Project"
+runButton = "Telegram Monitor Fixed"
 
 [[workflows.workflow]]
 name = "Project"
@@ -42,6 +42,15 @@ args = "python app.py"
 [[workflows.workflow]]
 name = "Telegram Monitor Server Updated"
 author = 47514288
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python app.py"
+
+[[workflows.workflow]]
+name = "Telegram Monitor Fixed"
+author = 47623095
 mode = "sequential"
 
 [[workflows.workflow.tasks]]
