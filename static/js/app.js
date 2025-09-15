@@ -106,6 +106,11 @@ function initializeSocket() {
                 updateUserTabs(data.current_user);
                 showNotification(data.message, 'success');
 
+                // عرض العمليات النشطة
+                if (data.active_operations) {
+                    displayActiveOperations(data.active_operations);
+                }
+
                 // تحديث الإعدادات فوراً
                 if (data.settings) {
                     updateFormFields(data.settings);
@@ -792,6 +797,77 @@ async function sendNow() {
         // إظهار معلومات الإرسال
         let contentDescription = '';
         if (message && selectedImages.length > 0) {
+
+// دالة عرض العمليات النشطة لجميع المستخدمين
+function displayActiveOperations(operations) {
+    try {
+        let activeCount = 0;
+        let activeDetails = [];
+        
+        for (const [userId, status] of Object.entries(operations)) {
+            if (status.is_running || status.monitoring_active) {
+                activeCount++;
+                let operations = [];
+                if (status.monitoring_active) operations.push('مراقبة');
+                if (status.is_running) operations.push('إرسال');
+                
+                activeDetails.push(`• ${status.name}: ${operations.join(', ')}`);
+            }
+        }
+        
+        if (activeCount > 0) {
+            const message = `🔄 العمليات النشطة (${activeCount}):\n${activeDetails.join('\n')}`;
+            addLogEntry(message, 'info');
+            showNotification(`${activeCount} عمليات تعمل في الخلفية`, 'info');
+        }
+        
+    } catch (error) {
+        console.error('Error displaying active operations:', error);
+    }
+}
+
+// معالجة حالة جميع المستخدمين
+if (typeof socket !== 'undefined') {
+    socket.on('all_users_status', function(data) {
+        displayActiveOperations(data);
+        updateUsersStatusIndicators(data);
+    });
+}
+
+// تحديث مؤشرات حالة المستخدمين
+function updateUsersStatusIndicators(allStatus) {
+    try {
+        const userTabs = document.querySelectorAll('.user-tab');
+        
+        userTabs.forEach(function(tab) {
+            const userId = tab.getAttribute('data-user-id');
+            
+            if (allStatus[userId]) {
+                const status = allStatus[userId];
+                
+                // إضافة مؤشر للعمليات النشطة
+                const existingIndicator = tab.querySelector('.status-indicator');
+                if (existingIndicator) {
+                    existingIndicator.remove();
+                }
+                
+                if (status.is_running || status.monitoring_active) {
+                    const indicator = document.createElement('span');
+                    indicator.className = 'status-indicator badge bg-success ms-2';
+                    indicator.style.fontSize = '0.7em';
+                    indicator.innerHTML = '●';
+                    indicator.title = 'عمليات نشطة';
+                    tab.appendChild(indicator);
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error updating users status indicators:', error);
+    }
+}
+
+
             contentDescription = `رسالة نصية مع ${selectedImages.length} صورة`;
         } else if (selectedImages.length > 0) {
             contentDescription = `${selectedImages.length} صورة`;

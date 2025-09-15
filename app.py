@@ -468,6 +468,57 @@ class TelegramClientManager:
             except Exception as emit_error:
                 logger.error(f"❌ Failed to emit immediate alert: {str(emit_error)}")
 
+def get_all_users_operations_status():
+    """الحصول على حالة العمليات لجميع المستخدمين"""
+    operations_status = {}
+    
+    with USERS_LOCK:
+        for user_id, user_data in USERS.items():
+            if user_id in PREDEFINED_USERS:
+                operations_status[user_id] = {
+                    'name': PREDEFINED_USERS[user_id]['name'],
+                    'connected': user_data.get('connected', False),
+                    'authenticated': user_data.get('authenticated', False),
+                    'is_running': user_data.get('is_running', False),
+                    'monitoring_active': user_data.get('monitoring_active', False),
+                    'stats': user_data.get('stats', {"sent": 0, "errors": 0})
+                }
+    
+    return operations_status
+
+def notify_user_about_background_operations(user_id):
+    """إشعار المستخدم بالعمليات التي تعمل في الخلفية"""
+    try:
+        active_operations = []
+        
+        with USERS_LOCK:
+            for uid, user_data in USERS.items():
+                if uid != user_id and uid in PREDEFINED_USERS:
+                    if user_data.get('is_running', False) or user_data.get('monitoring_active', False):
+                        active_operations.append({
+                            'user_name': PREDEFINED_USERS[uid]['name'],
+                            'operations': []
+                        })
+                        
+                        if user_data.get('monitoring_active', False):
+                            active_operations[-1]['operations'].append('مراقبة نشطة')
+                        if user_data.get('is_running', False):
+                            active_operations[-1]['operations'].append('إرسال مجدول')
+        
+        if active_operations:
+            operations_text = []
+            for op in active_operations:
+                operations_text.append(f"• {op['user_name']}: {', '.join(op['operations'])}")
+            
+            socketio.emit('log_update', {
+                "message": f"📊 العمليات النشطة في الخلفية:\n" + "\n".join(operations_text)
+            }, to=user_id)
+            
+    except Exception as e:
+        logger.error(f"Error notifying about background operations: {str(e)}")
+
+
+
             logger.info(f"✅ Keyword alert triggered for user {self.user_id}: '{keyword}' in {group_identifier}")
 
         except Exception as e:
@@ -996,6 +1047,35 @@ def monitoring_worker(user_id):
 
         # الحفاظ على المراقبة نشطة
         consecutive_errors = 0
+
+@app.route("/api/get_all_users_status", methods=["GET"])
+def api_get_all_users_status():
+    """الحصول على حالة جميع المستخدمين وعملياتهم"""
+    try:
+        all_status = get_all_users_operations_status()
+        
+        # إضافة معلومات إضافية
+        summary = {
+            'total_users': len(all_status),
+            'active_users': len([u for u in all_status.values() if u['connected']]),
+            'running_operations': len([u for u in all_status.values() if u['is_running']]),
+            'monitoring_active': len([u for u in all_status.values() if u['monitoring_active']])
+        }
+        
+        return jsonify({
+            "success": True,
+            "users_status": all_status,
+            "summary": summary
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting all users status: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"❌ خطأ: {str(e)}"
+        })
+
+
         max_consecutive_errors = 5
 
         while True:
@@ -1161,6 +1241,13 @@ def handle_connect():
             'current_user': user_id,
             'users': PREDEFINED_USERS
         })
+        
+        # إشعار بالعمليات النشطة في الخلفية
+        notify_user_about_background_operations(user_id)
+        
+        # إرسال حالة جميع المستخدمين
+        all_status = get_all_users_operations_status()
+        emit('all_users_status', all_status)
         
     except Exception as e:
         logger.error(f"Connection error: {str(e)}")
@@ -1816,7 +1903,7 @@ def api_user_logout():
 
 @app.route("/api/switch_user", methods=["POST"])
 def api_switch_user():
-    """التبديل إلى مستخدم آخر من المستخدمين الخمسة مع الحفاظ على حالة كل مستخدم"""
+    """التبديل إلى مستخدم آخر مع الحفاظ على استمرارية العمليات لجميع المستخدمين"""
     try:
         data = request.get_json()
         new_user_id = data.get('user_id')
@@ -1829,14 +1916,15 @@ def api_switch_user():
         
         old_user_id = session.get('user_id', 'user_1')
         
-        # حفظ إعدادات المستخدم القديم إذا كان موجوداً
+        # الحفاظ على العمليات المستمرة للمستخدم القديم
+        # لا نوقف العمليات الجارية، فقط نحفظ الإعدادات
         if old_user_id in USERS:
             current_settings = USERS[old_user_id].get('settings', {})
             if current_settings:
                 save_settings(old_user_id, current_settings)
-                logger.info(f"Settings saved for old user {old_user_id}")
+                logger.info(f"✅ Settings saved for user {old_user_id} - Operations continue running")
         
-        # التأكد من وجود بيانات المستخدم الجديد وتحميل إعداداته
+        # التأكد من وجود بيانات المستخدم الجديد
         with USERS_LOCK:
             if new_user_id not in USERS:
                 # تحميل الإعدادات المحفوظة للمستخدم الجديد
@@ -1869,25 +1957,29 @@ def api_switch_user():
                 saved_settings = load_settings(new_user_id)
                 USERS[new_user_id]['settings'].update(saved_settings)
         
-        # تحديث الجلسة
+        # تحديث الجلسة فقط للواجهة
         session['user_id'] = new_user_id
         session.permanent = True
         
-        logger.info(f"User switched from {old_user_id} to {new_user_id} via API")
+        logger.info(f"✅ User switched from {old_user_id} to {new_user_id} - All operations remain active")
+        
+        # عرض حالة العمليات المستمرة
+        active_operations_summary = get_all_users_operations_status()
         
         # إرسال الإعدادات الخاصة بالمستخدم الجديد
         socketio.emit('user_settings', USERS[new_user_id]['settings'], to=new_user_id)
         
         return jsonify({
             "success": True,
-            "message": f"✅ تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']}",
+            "message": f"✅ تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']} - العمليات مستمرة للجميع",
             "user": {
                 "id": new_user_id,
                 "name": PREDEFINED_USERS[new_user_id]['name'],
                 "icon": PREDEFINED_USERS[new_user_id]['icon'],
                 "color": PREDEFINED_USERS[new_user_id]['color']
             },
-            "settings": USERS[new_user_id]['settings']
+            "settings": USERS[new_user_id]['settings'],
+            "active_operations": active_operations_summary
         })
         
     except Exception as e:
