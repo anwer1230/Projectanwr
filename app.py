@@ -1105,7 +1105,7 @@ def handle_connect():
         logger.error(f"Connection error: {str(e)}")
         emit('connection_error', {'message': str(e)})
 
-# دالة Socket.IO للتبديل بين المستخدمين
+# دالة Socket.IO للتبديل بين المستخدمين - محسنة
 @socketio.on('switch_user')
 def handle_switch_user(data):
     """التبديل إلى مستخدم مختلف"""
@@ -1116,16 +1116,22 @@ def handle_switch_user(data):
             emit('error', {'message': 'مستخدم غير صحيح'})
             return
             
-        # مغادرة الغرفة القديمة
+        # مغادرة الغرفة القديمة بأمان
         old_user_id = session.get('user_id', 'user_1')
-        leave_room(old_user_id)
+        try:
+            leave_room(old_user_id)
+        except Exception as leave_error:
+            logger.warning(f"Error leaving room {old_user_id}: {str(leave_error)}")
         
         # تحديث الجلسة
         session['user_id'] = new_user_id
         session.permanent = True
         
-        # الانضمام للغرفة الجديدة
-        join_room(new_user_id)
+        # الانضمام للغرفة الجديدة بأمان
+        try:
+            join_room(new_user_id)
+        except Exception as join_error:
+            logger.warning(f"Error joining room {new_user_id}: {str(join_error)}")
         
         logger.info(f"User switched from {old_user_id} to {new_user_id}")
         
@@ -1137,40 +1143,43 @@ def handle_switch_user(data):
         })
         
         # إرسال حالة المستخدم الجديد
-        user_id = new_user_id
-        with USERS_LOCK:
-            if user_id in USERS:
-                connected = USERS[user_id].get('connected', False)
-                authenticated = USERS[user_id].get('authenticated', False)
-                awaiting_code = USERS[user_id].get('awaiting_code', False)
-                awaiting_password = USERS[user_id].get('awaiting_password', False)
-                is_running = USERS[user_id].get('is_running', False)
-                
-                emit('connection_status', {
-                    "status": "connected" if connected else "disconnected"
-                })
-                
-                emit('login_status', {
-                    "logged_in": authenticated,
-                    "connected": connected,
-                    "awaiting_code": awaiting_code,
-                    "awaiting_password": awaiting_password,
-                    "is_running": is_running
-                })
-                
-                # إرسال إعدادات المستخدم
-                settings = load_settings(user_id)
-                emit('user_settings', settings)
-            else:
-                # إرسال حالة افتراضية للمستخدم الجديد
-                emit('connection_status', {"status": "disconnected"})
-                emit('login_status', {
-                    "logged_in": False,
-                    "connected": False,
-                    "awaiting_code": False,
-                    "awaiting_password": False,
-                    "is_running": False
-                })
+        try:
+            with USERS_LOCK:
+                if new_user_id in USERS:
+                    user_data = USERS[new_user_id]
+                    connected = user_data.get('connected', False)
+                    authenticated = user_data.get('authenticated', False)
+                    awaiting_code = user_data.get('awaiting_code', False)
+                    awaiting_password = user_data.get('awaiting_password', False)
+                    is_running = user_data.get('is_running', False)
+                    
+                    emit('connection_status', {
+                        "status": "connected" if connected else "disconnected"
+                    })
+                    
+                    emit('login_status', {
+                        "logged_in": authenticated,
+                        "connected": connected,
+                        "awaiting_code": awaiting_code,
+                        "awaiting_password": awaiting_password,
+                        "is_running": is_running
+                    })
+                    
+                    # إرسال إعدادات المستخدم
+                    settings = load_settings(new_user_id)
+                    emit('user_settings', settings)
+                else:
+                    # إرسال حالة افتراضية للمستخدم الجديد
+                    emit('connection_status', {"status": "disconnected"})
+                    emit('login_status', {
+                        "logged_in": False,
+                        "connected": False,
+                        "awaiting_code": False,
+                        "awaiting_password": False,
+                        "is_running": False
+                    })
+        except Exception as status_error:
+            logger.error(f"Error sending user status: {str(status_error)}")
                 
     except Exception as e:
         logger.error(f"Error switching user: {str(e)}")

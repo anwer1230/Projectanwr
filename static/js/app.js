@@ -99,18 +99,22 @@ function initializeSocket() {
             updateUserTabs(data.current_user);
         });
 
-        // عند نجاح التبديل
+        // عند نجاح التبديل عبر Socket.IO
         socket.on('user_switched', function(data) {
-            currentUserId = data.current_user;
-            updateUserTabs(data.current_user);
-            showNotification(data.message, 'success');
+            try {
+                currentUserId = data.current_user;
+                updateUserTabs(data.current_user);
+                showNotification(data.message, 'success');
 
-            // تحديث الإعدادات فوراً
-            if (data.settings) {
-                updateFormFields(data.settings);
+                // تحديث الإعدادات فوراً
+                if (data.settings) {
+                    updateFormFields(data.settings);
+                }
+
+                setTimeout(() => window.location.reload(), 1500);
+            } catch (error) {
+                console.error('Error handling user_switched event:', error);
             }
-
-            setTimeout(() => window.location.reload(), 1000);
         });
 
         socket.on('user_settings', function(settings) {
@@ -886,32 +890,77 @@ function switchToUser(userId) {
 
     // تعطيل جميع الأزرار مؤقتاً
     const allTabs = document.querySelectorAll('.user-tab');
-    allTabs.forEach(t => t.disabled = true);
+    allTabs.forEach(t => {
+        t.disabled = true;
+        t.style.opacity = '0.6';
+    });
 
     showNotification('جاري التبديل إلى ' + tab.textContent.trim() + '...', 'info');
 
-    // إرسال طلب التبديل عبر Socket.IO
-    if (socket) {
-        socket.emit('switch_user', {
+    // إرسال طلب التبديل عبر fetch API بدلاً من Socket.IO
+    fetch('/api/switch_user', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
             user_id: userId
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            currentUserId = userId;
+            updateUserTabs(userId);
+            showNotification(data.message, 'success');
+            
+            // إعادة تحميل الصفحة لعرض بيانات المستخدم الجديد
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            throw new Error(data.message || 'فشل في التبديل');
+        }
+    })
+    .catch(error => {
+        console.error('Error switching user:', error);
+        showNotification('خطأ في التبديل: ' + error.message, 'error');
+        
+        // إعادة تفعيل الأزرار عند الفشل
+        allTabs.forEach(t => {
+            t.disabled = false;
+            t.style.opacity = '1';
         });
-    }
+    });
 }
 
 function updateUserTabs(activeUserId) {
-    const userTabs = document.querySelectorAll('.user-tab');
+    try {
+        const userTabs = document.querySelectorAll('.user-tab');
 
-    userTabs.forEach(function(tab) {
-        const userId = tab.getAttribute('data-user-id');
+        userTabs.forEach(function(tab) {
+            const userId = tab.getAttribute('data-user-id');
 
-        if (userId === activeUserId) {
-            tab.classList.add('active');
-            tab.disabled = false;
-        } else {
-            tab.classList.remove('active');
-            tab.disabled = false;
-        }
-    });
+            if (userId === activeUserId) {
+                tab.classList.add('active');
+                tab.disabled = false;
+                tab.style.opacity = '1';
+            } else {
+                tab.classList.remove('active');
+                tab.disabled = false;
+                tab.style.opacity = '1';
+            }
+        });
+        
+        console.log(`✅ Updated user tabs, active user: ${activeUserId}`);
+    } catch (error) {
+        console.error('❌ Error updating user tabs:', error);
+    }
 }
 
 // دالة تحديث حقول النموذج بإعدادات المستخدم
