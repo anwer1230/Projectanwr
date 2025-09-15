@@ -823,7 +823,7 @@ class TelegramManager:
             raise Exception(str(e))
 
     def send_message_with_media_async(self, user_id, entity, message, image_files):
-        """إرسال رسالة مع صور - طريقة محسنة"""
+        """إرسال رسالة مع صور - طريقة محسنة ومُصلحة"""
         try:
             with USERS_LOCK:
                 if user_id not in USERS:
@@ -854,39 +854,100 @@ class TelegramManager:
 
             results = []
 
-            # إرسال الصور مع الرسالة النصية كـ caption للصورة الأولى
-            if image_files:
-                for i, img_file in enumerate(image_files):
-                    try:
-                        # للصورة الأولى نضع الرسالة النصية كـ caption
-                        caption = message if i == 0 and message else f"📷 {img_file['name']}"
-                        
-                        # التأكد من وجود الملف
-                        if not os.path.exists(img_file['path']):
-                            logger.error(f"Image file not found: {img_file['path']}")
-                            continue
-                            
-                        media_result = client_manager.run_coroutine(
-                            client_manager.client.send_file(
-                                entity_obj, 
-                                img_file['path'],
-                                caption=caption
+            # إرسال الصور مع الرسالة النصية
+            if image_files and len(image_files) > 0:
+                # طريقة محسنة: إرسال جميع الصور مع النص كرسالة واحدة
+                try:
+                    # تحضير مسارات الصور
+                    image_paths = []
+                    for img_file in image_files:
+                        if os.path.exists(img_file['path']):
+                            image_paths.append(img_file['path'])
+                        else:
+                            logger.warning(f"Image file not found: {img_file['path']}")
+
+                    if image_paths:
+                        # إرسال كل الصور مع النص كرسالة واحدة
+                        if len(image_paths) == 1:
+                            # صورة واحدة فقط
+                            media_result = client_manager.run_coroutine(
+                                client_manager.client.send_file(
+                                    entity_obj, 
+                                    image_paths[0],
+                                    caption=message if message else "📷"
+                                )
                             )
+                            results.append(media_result.id)
+                            logger.info(f"Successfully sent single image with message to {entity}")
+                        else:
+                            # عدة صور - إرسال كمجموعة (album)
+                            try:
+                                # إرسال النص أولاً إذا كان موجوداً
+                                if message and message.strip():
+                                    text_result = client_manager.run_coroutine(
+                                        client_manager.client.send_message(entity_obj, message)
+                                    )
+                                    results.append(text_result.id)
+
+                                # ثم إرسال الصور كمجموعة
+                                media_result = client_manager.run_coroutine(
+                                    client_manager.client.send_file(
+                                        entity_obj, 
+                                        image_paths,
+                                        caption="📷 مجموعة صور"
+                                    )
+                                )
+                                
+                                # معالجة النتائج
+                                if hasattr(media_result, '__iter__'):
+                                    for result in media_result:
+                                        results.append(result.id)
+                                else:
+                                    results.append(media_result.id)
+                                    
+                                logger.info(f"Successfully sent {len(image_paths)} images as album to {entity}")
+                            except Exception as album_error:
+                                logger.warning(f"Failed to send as album, sending individually: {str(album_error)}")
+                                
+                                # إرسال النص أولاً إذا كان موجوداً
+                                if message and message.strip():
+                                    text_result = client_manager.run_coroutine(
+                                        client_manager.client.send_message(entity_obj, message)
+                                    )
+                                    results.append(text_result.id)
+
+                                # إرسال الصور واحدة تلو الأخرى
+                                for i, img_path in enumerate(image_paths):
+                                    try:
+                                        media_result = client_manager.run_coroutine(
+                                            client_manager.client.send_file(
+                                                entity_obj, 
+                                                img_path,
+                                                caption=f"📷 صورة {i+1}"
+                                            )
+                                        )
+                                        results.append(media_result.id)
+                                    except Exception as img_error:
+                                        logger.error(f"Error sending individual image {i+1}: {str(img_error)}")
+                                        continue
+
+                except Exception as media_error:
+                    logger.error(f"Error in media sending process: {str(media_error)}")
+                    # كحل أخير، أرسل النص فقط
+                    if message and message.strip():
+                        text_result = client_manager.run_coroutine(
+                            client_manager.client.send_message(entity_obj, message)
                         )
-                        results.append(media_result.id)
-                        logger.info(f"Successfully sent image {img_file['name']} to {entity}")
-                        
-                    except Exception as img_error:
-                        logger.error(f"Error sending image {img_file['name']}: {str(img_error)}")
-                        # نواصل مع الصور الأخرى حتى لو فشلت صورة واحدة
-                        continue
+                        results.append(text_result.id)
+                        logger.info(f"Sent text only due to media error: {str(media_error)}")
             else:
                 # إذا لم تكن هناك صور، أرسل الرسالة النصية فقط
-                if message:
+                if message and message.strip():
                     text_result = client_manager.run_coroutine(
                         client_manager.client.send_message(entity_obj, message)
                     )
                     results.append(text_result.id)
+                    logger.info(f"Successfully sent text message to {entity}")
 
             return {"success": True, "message_ids": results}
 

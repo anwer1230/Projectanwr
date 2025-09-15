@@ -154,11 +154,8 @@ function initializeForms() {
         loginForm.addEventListener('submit', handleLogin);
     }
 
-    // معالجة رفع الصور
-    const imageUpload = document.getElementById('imageUpload');
-    if (imageUpload) {
-        imageUpload.addEventListener('change', handleImageUpload);
-    }
+    // تهيئة نظام رفع الصور المحسن
+    initializeImageUpload();
 
     // زر مسح الصور
     const clearImagesBtn = document.getElementById('clearImages');
@@ -536,12 +533,71 @@ function getLogType(message) {
 }
 
 // =========================== 
-// دوال رفع ومعالجة الصور
+// دوال رفع ومعالجة الصور المحسنة
 // ===========================
 let selectedImages = [];
 
-function handleImageUpload(e) {
-    const files = Array.from(e.target.files);
+// تهيئة نظام رفع الصور مع السحب والإفلات
+function initializeImageUpload() {
+    const dropZone = document.getElementById('dropZone');
+    const imageUpload = document.getElementById('imageUpload');
+
+    if (!dropZone || !imageUpload) return;
+
+    // النقر على منطقة السحب لفتح اختيار الملفات
+    dropZone.addEventListener('click', function() {
+        imageUpload.click();
+    });
+
+    // منع السلوك الافتراضي للسحب والإفلات
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+
+    // تمييز منطقة السحب عند السحب
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, highlight, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, unhighlight, false);
+    });
+
+    // معالجة الإفلات
+    dropZone.addEventListener('drop', handleDrop, false);
+
+    // معالجة اختيار الملفات العادي
+    imageUpload.addEventListener('change', function(e) {
+        handleFiles(e.target.files);
+    });
+}
+
+function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+function highlight(e) {
+    const dropZone = document.getElementById('dropZone');
+    dropZone.classList.add('border-primary', 'bg-light');
+    dropZone.style.borderColor = '#0d6efd';
+}
+
+function unhighlight(e) {
+    const dropZone = document.getElementById('dropZone');
+    dropZone.classList.remove('border-primary', 'bg-light');
+    dropZone.style.borderColor = '';
+}
+
+function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    handleFiles(files);
+}
+
+function handleFiles(fileList) {
+    const files = Array.from(fileList);
 
     if (files.length === 0) {
         return;
@@ -563,6 +619,16 @@ function handleImageUpload(e) {
             return;
         }
 
+        // التحقق من عدم تكرار الملف
+        const isDuplicate = selectedImages.some(existingFile => 
+            existingFile.name === file.name && existingFile.size === file.size
+        );
+
+        if (isDuplicate) {
+            showNotification(`الملف موجود مسبقاً: ${file.name}`, 'warning');
+            return;
+        }
+
         validFiles.push(file);
     });
 
@@ -570,13 +636,14 @@ function handleImageUpload(e) {
     if (validFiles.length > 0) {
         selectedImages = [...selectedImages, ...validFiles];
         displayImagePreview();
-        showNotification(`تم اختيار ${validFiles.length} صورة جديدة. المجموع: ${selectedImages.length}`, 'success');
+        showNotification(`تم إضافة ${validFiles.length} صورة. المجموع: ${selectedImages.length}`, 'success');
     }
 }
 
 function displayImagePreview() {
     const preview = document.getElementById('imagePreview');
     const container = document.getElementById('imagePreviewContainer');
+    const imageCount = document.getElementById('imageCount');
 
     if (selectedImages.length === 0) {
         preview.style.display = 'none';
@@ -585,41 +652,68 @@ function displayImagePreview() {
 
     preview.style.display = 'block';
     container.innerHTML = '';
+    
+    if (imageCount) {
+        imageCount.textContent = selectedImages.length;
+    }
 
     selectedImages.forEach((file, index) => {
         const reader = new FileReader();
         reader.onload = function(e) {
-            const imageDiv = document.createElement('div');
-            imageDiv.className = 'position-relative d-inline-block m-2';
-            imageDiv.innerHTML = `
-                <img src="${e.target.result}" class="img-thumbnail" 
-                     style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px;">
-                <button type="button" class="btn btn-danger btn-sm position-absolute" 
+            const colDiv = document.createElement('div');
+            colDiv.className = 'col-6 col-md-4 col-lg-3';
+            
+            const imageCard = document.createElement('div');
+            imageCard.className = 'card border-0 shadow-sm position-relative';
+            imageCard.innerHTML = `
+                <img src="${e.target.result}" class="card-img-top" 
+                     style="height: 120px; object-fit: cover;">
+                <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 m-1" 
                         onclick="removeImage(${index})" 
-                        style="top: -8px; right: -8px; font-size: 0.6rem; padding: 4px 6px; border-radius: 50%;">
+                        style="font-size: 0.7rem; padding: 4px 8px; border-radius: 50%;"
+                        title="حذف الصورة">
                     <i class="fas fa-times"></i>
                 </button>
-                <small class="d-block text-center mt-1 text-truncate" style="max-width: 100px;" title="${file.name}">
-                    ${file.name.length > 12 ? file.name.substring(0, 12) + '...' : file.name}
-                </small>
+                <div class="card-body p-2">
+                    <small class="text-muted text-truncate d-block" title="${file.name}">
+                        ${file.name.length > 15 ? file.name.substring(0, 15) + '...' : file.name}
+                    </small>
+                    <small class="text-muted">${formatFileSize(file.size)}</small>
+                </div>
             `;
-            container.appendChild(imageDiv);
+            
+            colDiv.appendChild(imageCard);
+            container.appendChild(colDiv);
         };
         reader.readAsDataURL(file);
     });
 }
 
 function removeImage(index) {
-    selectedImages.splice(index, 1);
-    displayImagePreview();
-    showNotification('تم حذف الصورة', 'info');
+    if (index >= 0 && index < selectedImages.length) {
+        const removedFile = selectedImages[index];
+        selectedImages.splice(index, 1);
+        displayImagePreview();
+        showNotification(`تم حذف: ${removedFile.name}`, 'info');
+    }
 }
 
 function clearImages() {
     selectedImages = [];
-    document.getElementById('imageUpload').value = '';
+    const imageUpload = document.getElementById('imageUpload');
+    if (imageUpload) {
+        imageUpload.value = '';
+    }
     displayImagePreview();
     showNotification('تم مسح جميع الصور', 'info');
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 async function convertImageToBase64(file) {
@@ -629,6 +723,13 @@ async function convertImageToBase64(file) {
         reader.onerror = reject;
         reader.readAsDataURL(file);
     });
+}
+
+// دالة مساعدة للتحقق من وجود ملف بنفس الاسم
+function isFileAlreadySelected(file) {
+    return selectedImages.some(existingFile => 
+        existingFile.name === file.name && existingFile.size === file.size
+    );
 }
 
 // =========================== 
@@ -688,16 +789,28 @@ async function sendNow() {
         sendBtn.disabled = true;
         sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>جاري الإرسال...';
 
+        // إظهار معلومات الإرسال
+        let contentDescription = '';
+        if (message && selectedImages.length > 0) {
+            contentDescription = `رسالة نصية مع ${selectedImages.length} صورة`;
+        } else if (selectedImages.length > 0) {
+            contentDescription = `${selectedImages.length} صورة`;
+        } else {
+            contentDescription = 'رسالة نصية';
+        }
+
+        showNotification(`بدء إرسال ${contentDescription}...`, 'info');
+
         // تحضير بيانات الإرسال
         const sendData = {
-            message: message,
+            message: message || '',
             groups: groups,
             images: []
         };
 
         // تحويل الصور إلى Base64 إذا وجدت
         if (selectedImages.length > 0) {
-            showNotification(`جاري تحضير ${selectedImages.length} صورة...`, 'info');
+            showNotification(`جاري تحضير ${selectedImages.length} صورة للإرسال...`, 'info');
 
             for (let i = 0; i < selectedImages.length; i++) {
                 const file = selectedImages[i];
@@ -709,12 +822,29 @@ async function sendNow() {
                         size: file.size,
                         data: base64
                     });
+                    
+                    // تحديث حالة التحضير
+                    if (i % 2 === 0) { // تحديث كل صورتين لتجنب الإفراط
+                        showNotification(`تم تحضير ${i + 1}/${selectedImages.length} صورة...`, 'info');
+                    }
                 } catch (error) {
                     console.error(`Error converting image ${file.name}:`, error);
-                    showNotification(`خطأ في تحضير الصورة: ${file.name}`, 'warning');
+                    showNotification(`تعذر تحضير الصورة: ${file.name}`, 'warning');
                 }
             }
+
+            if (sendData.images.length !== selectedImages.length) {
+                showNotification(`تم تحضير ${sendData.images.length} من أصل ${selectedImages.length} صورة`, 'warning');
+            } else {
+                showNotification(`تم تحضير جميع الصور بنجاح (${sendData.images.length})`, 'success');
+            }
         }
+
+        console.log('Sending data:', {
+            message: sendData.message ? 'نص موجود' : 'لا يوجد نص',
+            groups: sendData.groups.split('\n').length + ' مجموعة',
+            images: sendData.images.length + ' صورة'
+        });
 
         const response = await fetch('/api/send_now', {
             method: 'POST',
@@ -728,9 +858,13 @@ async function sendNow() {
 
         if (data.success) {
             showNotification(data.message, 'success');
+            
             // مسح الصور بعد الإرسال الناجح
             if (selectedImages.length > 0) {
-                clearImages();
+                setTimeout(() => {
+                    clearImages();
+                    showNotification('تم مسح الصور المُرسلة من القائمة', 'info');
+                }, 2000);
             }
         } else {
             showNotification(data.message, 'error');
@@ -738,7 +872,7 @@ async function sendNow() {
 
     } catch (error) {
         console.error('Send now error:', error);
-        showNotification('خطأ في الإرسال', 'error');
+        showNotification('خطأ في الإرسال: ' + error.message, 'error');
     } finally {
         sendBtn.disabled = false;
         sendBtn.innerHTML = originalText;
