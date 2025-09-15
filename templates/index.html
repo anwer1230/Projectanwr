@@ -756,7 +756,7 @@
         window.addEventListener('beforeinstallprompt', function(e) {
             console.log('📱 PWA: Install prompt triggered');
             e.preventDefault();
-            deferredPrompt = e;
+            globalDeferredPrompt = e;
 
             // إظهار زر التثبيت
             installAppBtn.style.display = 'inline-block';
@@ -767,17 +767,17 @@
 
         // معالجة النقر على زر التثبيت
         installAppBtn.addEventListener('click', async function() {
-            if (!deferredPrompt) {
+            if (!globalDeferredPrompt) {
                 showNotification('التطبيق مثبت بالفعل أو غير متاح للتثبيت', 'info');
                 return;
             }
 
             try {
                 // عرض نافذة التثبيت
-                deferredPrompt.prompt();
+                globalDeferredPrompt.prompt();
 
                 // انتظار اختيار المستخدم
-                const { outcome } = await deferredPrompt.userChoice;
+                const { outcome } = await globalDeferredPrompt.userChoice;
 
                 if (outcome === 'accepted') {
                     console.log('✅ PWA: User accepted the install prompt');
@@ -790,7 +790,7 @@
                     showNotification('تم إلغاء التثبيت', 'warning');
                 }
 
-                deferredPrompt = null;
+                globalDeferredPrompt = null;
             } catch (error) {
                 console.error('❌ PWA: Error during installation:', error);
                 showNotification('حدث خطأ أثناء التثبيت', 'error');
@@ -896,7 +896,8 @@
         // نظام التبديل بين المستخدمين
         // ===========================
         
-        let currentUserId = '{{ current_user.id }}';
+        var globalCurrentUserId = '{{ current_user.id }}';
+        var globalDeferredPrompt = null;
         
         // دالة عرض الإشعارات
         function showNotification(message, type = 'info', duration = 5000) {
@@ -918,6 +919,19 @@
                         notification.remove();
                     }
                 }, duration);
+
+                // إشعار الجهاز إن أمكن
+                if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                    navigator.serviceWorker.ready.then(registration => {
+                        registration.showNotification('مركز سرعة انجاز', {
+                            body: message,
+                            icon: '/static/icons/icon-192x192.png',
+                            badge: '/static/icons/icon-72x72.png'
+                        });
+                    }).catch(err => {
+                        console.log('Notification error:', err);
+                    });
+                }
 
             } catch (error) {
                 console.error('Error showing notification:', error);
@@ -954,7 +968,7 @@
                     
                     const newUserId = this.getAttribute('data-user-id');
                     
-                    if (newUserId === currentUserId) {
+                    if (newUserId === globalCurrentUserId) {
                         showNotification('أنت بالفعل في حساب ' + this.textContent.trim(), 'info');
                         return;
                     }
@@ -962,6 +976,15 @@
                     switchToUser(newUserId);
                 });
             });
+            
+            // طلب إذن التنبيهات
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().then(function(permission) {
+                    if (permission === 'granted') {
+                        console.log('✅ Notification permission granted');
+                    }
+                });
+            }
         });
         
         // دالة التبديل إلى مستخدم آخر
@@ -991,8 +1014,9 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    currentUserId = userId;
+                    globalCurrentUserId = userId;
                     updateUserTabs(userId);
+                    updateCurrentUserDisplay(data.user);
                     showNotification(data.message, 'success');
                     
                     // إعادة تحميل الصفحة لعرض بيانات المستخدم الجديد
@@ -1012,6 +1036,29 @@
             });
         }
         
+        // دالة تحديث عرض المستخدم الحالي
+        function updateCurrentUserDisplay(userData) {
+            try {
+                // تحديث النص في شريط المستخدمين
+                const currentUserInfo = document.querySelector('.text-info strong');
+                if (currentUserInfo && userData) {
+                    currentUserInfo.textContent = userData.name;
+                    currentUserInfo.style.color = userData.color;
+                }
+                
+                // تحديث أيقونة المستخدم في العنوان إن وجدت
+                const userIcon = document.querySelector('.header-title .fas.fa-graduation-cap');
+                if (userIcon && userData && userData.icon) {
+                    userIcon.className = userData.icon + ' me-2';
+                }
+                
+                console.log('✅ Current user display updated:', userData);
+                
+            } catch (error) {
+                console.error('❌ Error updating current user display:', error);
+            }
+        }
+        
         // معالجة أحداث Socket.IO الخاصة بالمستخدمين
         if (typeof socket !== 'undefined') {
             
@@ -1026,8 +1073,14 @@
             socket.on('user_switched', function(data) {
                 console.log('👤 User switched to:', data);
                 
-                currentUserId = data.current_user;
+                globalCurrentUserId = data.current_user;
                 updateUserTabs(data.current_user);
+                
+                // تحديث عرض المستخدم الحالي
+                updateCurrentUserDisplay({
+                    name: data.user_name,
+                    color: getColorForUser(data.current_user)
+                });
                 
                 showNotification(data.message, 'success');
                 
@@ -1036,6 +1089,17 @@
                     window.location.reload();
                 }, 1000);
             });
+            
+            function getColorForUser(userId) {
+                const userColors = {
+                    'user_1': '#007bff',
+                    'user_2': '#28a745', 
+                    'user_3': '#ffc107',
+                    'user_4': '#dc3545',
+                    'user_5': '#6f42c1'
+                };
+                return userColors[userId] || '#007bff';
+            }
             
             // عند استقبال إعدادات المستخدم
             socket.on('user_settings', function(settings) {

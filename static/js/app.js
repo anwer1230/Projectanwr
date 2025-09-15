@@ -2,8 +2,9 @@
 // متغيرات عامة
 // ===========================
 let socket;
-let currentUserId = document.querySelector('script')?.textContent?.match(/currentUserId = '([^']+)'/)?.[1] || 'user_1';
+let currentUserId = 'user_1';
 let extractedLinks = [];
+let deferredPrompt;
 
 // =========================== 
 // تهيئة Socket.IO والتطبيق

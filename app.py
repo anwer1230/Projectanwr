@@ -730,19 +730,24 @@ class TelegramManager:
         try:
             with USERS_LOCK:
                 if user_id not in USERS:
-                    raise Exception("المستخدم غير موجود")
+                    raise Exception("المستخدم غير موجود - يرجى تسجيل الدخول أولاً")
 
                 client_manager = USERS[user_id].get('client_manager')
+                if not client_manager:
+                    raise Exception("لم يتم تسجيل الدخول - يرجى تسجيل الدخول في التليجرام أولاً")
 
-            if not client_manager:
-                raise Exception("العميل غير متصل")
+                if not client_manager.client:
+                    raise Exception("عميل التليجرام غير مُهيأ - يرجى إعادة تسجيل الدخول")
 
-            is_authorized = client_manager.run_coroutine(
-                client_manager.client.is_user_authorized()
-            )
+            try:
+                is_authorized = client_manager.run_coroutine(
+                    client_manager.client.is_user_authorized()
+                )
 
-            if not is_authorized:
-                raise Exception("العميل غير مصرح")
+                if not is_authorized:
+                    raise Exception("جلسة التليجرام منتهية الصلاحية - يرجى إعادة تسجيل الدخول")
+            except Exception as auth_error:
+                raise Exception(f"خطأ في التحقق من التصريح: {str(auth_error)}")
 
             try:
                 entity_obj = client_manager.run_coroutine(
