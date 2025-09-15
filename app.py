@@ -765,6 +765,119 @@ class TelegramManager:
             logger.error(f"Send message error: {str(e)}")
             raise Exception(str(e))
 
+    def send_media_async(self, user_id, entity, image_files):
+        """إرسال الصور فقط"""
+        try:
+            with USERS_LOCK:
+                if user_id not in USERS:
+                    raise Exception("المستخدم غير موجود")
+
+                client_manager = USERS[user_id].get('client_manager')
+
+            if not client_manager:
+                raise Exception("العميل غير متصل")
+
+            is_authorized = client_manager.run_coroutine(
+                client_manager.client.is_user_authorized()
+            )
+
+            if not is_authorized:
+                raise Exception("العميل غير مصرح")
+
+            try:
+                entity_obj = client_manager.run_coroutine(
+                    client_manager.client.get_entity(entity)
+                )
+            except:
+                if not entity.startswith('@') and not entity.startswith('https://'):
+                    entity = '@' + entity
+                entity_obj = client_manager.run_coroutine(
+                    client_manager.client.get_entity(entity)
+                )
+
+            # إرسال كل صورة منفصلة
+            results = []
+            for img_file in image_files:
+                try:
+                    result = client_manager.run_coroutine(
+                        client_manager.client.send_file(
+                            entity_obj, 
+                            img_file['path'],
+                            caption=f"📷 {img_file['name']}"
+                        )
+                    )
+                    results.append(result.id)
+                except Exception as img_error:
+                    logger.error(f"Error sending image {img_file['name']}: {str(img_error)}")
+                    raise img_error
+
+            return {"success": True, "message_ids": results}
+
+        except Exception as e:
+            logger.error(f"Send media error: {str(e)}")
+            raise Exception(str(e))
+
+    def send_message_with_media_async(self, user_id, entity, message, image_files):
+        """إرسال رسالة مع صور"""
+        try:
+            with USERS_LOCK:
+                if user_id not in USERS:
+                    raise Exception("المستخدم غير موجود")
+
+                client_manager = USERS[user_id].get('client_manager')
+
+            if not client_manager:
+                raise Exception("العميل غير متصل")
+
+            is_authorized = client_manager.run_coroutine(
+                client_manager.client.is_user_authorized()
+            )
+
+            if not is_authorized:
+                raise Exception("العميل غير مصرح")
+
+            try:
+                entity_obj = client_manager.run_coroutine(
+                    client_manager.client.get_entity(entity)
+                )
+            except:
+                if not entity.startswith('@') and not entity.startswith('https://'):
+                    entity = '@' + entity
+                entity_obj = client_manager.run_coroutine(
+                    client_manager.client.get_entity(entity)
+                )
+
+            results = []
+
+            # إرسال الرسالة النصية أولاً
+            if message:
+                text_result = client_manager.run_coroutine(
+                    client_manager.client.send_message(entity_obj, message)
+                )
+                results.append(text_result.id)
+
+            # إرسال الصور
+            for img_file in image_files:
+                try:
+                    media_result = client_manager.run_coroutine(
+                        client_manager.client.send_file(
+                            entity_obj, 
+                            img_file['path'],
+                            caption=f"📷 {img_file['name']}"
+                        )
+                    )
+                    results.append(media_result.id)
+                except Exception as img_error:
+                    logger.error(f"Error sending image {img_file['name']}: {str(img_error)}")
+                    # نواصل مع الصور الأخرى حتى لو فشلت صورة واحدة
+                    continue
+
+            return {"success": True, "message_ids": results}
+
+        except Exception as e:
+            logger.error(f"Send message with media error: {str(e)}")
+            raise Exception(str(e))
+
 
 # إنشاء مدير التليجرام
 telegram_manager = TelegramManager()
@@ -1779,7 +1892,7 @@ def api_send_now():
                 "message": "❌ يجب تسجيل الدخول أولاً"
             })
 
-    # قراءة البيانات من الطلب المرسل من JavaScript بدلاً من الإعدادات المحفوظة
+    # قراءة البيانات من الطلب المرسل من JavaScript
     data = request.get_json()
     if not data:
         return jsonify({
@@ -1789,11 +1902,13 @@ def api_send_now():
 
     message = data.get('message', '').strip()
     groups = data.get('groups', '').strip()
+    images = data.get('images', [])
 
-    if not message:
+    # التحقق من وجود محتوى للإرسال
+    if not message and not images:
         return jsonify({
             "success": False, 
-            "message": "❌ يجب كتابة رسالة للإرسال"
+            "message": "❌ يجب كتابة رسالة أو رفع صورة للإرسال"
         })
 
     if not groups:
@@ -1811,18 +1926,71 @@ def api_send_now():
             "message": "❌ يجب تحديد مجموعة واحدة على الأقل"
         })
 
+    # تحضير الصور إذا وجدت
+    image_files = []
+    if images:
+        try:
+            import base64
+            import tempfile
+            
+            for img_data in images:
+                # استخراج البيانات من Base64
+                base64_data = img_data['data'].split(',')[1]  # إزالة البادئة
+                image_bytes = base64.b64decode(base64_data)
+                
+                # إنشاء ملف مؤقت
+                temp_file = tempfile.NamedTemporaryFile(delete=False, 
+                                                     suffix=f".{img_data['type'].split('/')[-1]}")
+                temp_file.write(image_bytes)
+                temp_file.flush()
+                
+                image_files.append({
+                    'path': temp_file.name,
+                    'name': img_data['name'],
+                    'type': img_data['type']
+                })
+                
+            socketio.emit('log_update', {
+                "message": f"📷 تم تحضير {len(image_files)} صورة للإرسال"
+            }, to=user_id)
+            
+        except Exception as e:
+            logger.error(f"Error processing images: {str(e)}")
+            return jsonify({
+                "success": False,
+                "message": f"❌ خطأ في معالجة الصور: {str(e)}"
+            })
+
+    content_type = "رسالة"
+    if images and message:
+        content_type = f"رسالة مع {len(images)} صورة"
+    elif images:
+        content_type = f"{len(images)} صورة"
+
     socketio.emit('log_update', {
-        "message": f"🚀 بدء الإرسال الفوري إلى {len(groups_list)} مجموعة"
+        "message": f"🚀 بدء الإرسال الفوري: {content_type} إلى {len(groups_list)} مجموعة"
     }, to=user_id)
 
-    def send_messages():
+    def send_messages_with_images():
         try:
             successful = 0
             failed = 0
 
             for i, group in enumerate(groups_list, 1):
                 try:
-                    result = telegram_manager.send_message_async(user_id, group, message)
+                    if images and message:
+                        # إرسال الصور مع النص
+                        result = telegram_manager.send_message_with_media_async(
+                            user_id, group, message, image_files
+                        )
+                    elif images:
+                        # إرسال الصور فقط
+                        result = telegram_manager.send_media_async(
+                            user_id, group, image_files
+                        )
+                    else:
+                        # إرسال النص فقط
+                        result = telegram_manager.send_message_async(user_id, group, message)
 
                     socketio.emit('log_update', {
                         "message": f"✅ [{i}/{len(groups_list)}] نجح إلى: {group}"
@@ -1863,17 +2031,26 @@ def api_send_now():
 
             # ملخص نهائي
             socketio.emit('log_update', {
-                "message": f"📊 انتهى الإرسال الفوري: ✅ {successful} نجح | ❌ {failed} فشل"
+                "message": f"📊 انتهى الإرسال: ✅ {successful} نجح | ❌ {failed} فشل"
             }, to=user_id)
 
         except Exception as e:
             logger.error(f"Send thread error: {str(e)}")
+        finally:
+            # تنظيف الملفات المؤقتة
+            for img_file in image_files:
+                try:
+                    import os
+                    if os.path.exists(img_file['path']):
+                        os.unlink(img_file['path'])
+                except Exception as e:
+                    logger.error(f"Error cleaning temp file: {str(e)}")
 
-    threading.Thread(target=send_messages, daemon=True).start()
+    threading.Thread(target=send_messages_with_images, daemon=True).start()
 
     return jsonify({
         "success": True, 
-        "message": f"🚀 بدأ إرسال {len(groups_list)} رسالة"
+        "message": f"🚀 بدأ إرسال {content_type} لـ {len(groups_list)} مجموعة"
     })
 
 @app.route("/api/get_stats", methods=["GET"])
