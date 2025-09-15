@@ -579,6 +579,28 @@
                                 </div>
                             </div>
 
+                            <!-- قسم رفع الصور -->
+                            <div class="mb-3">
+                                <label for="imageUpload" class="form-label">
+                                    <i class="fas fa-image me-2"></i>رفع صورة مع الرسالة (اختياري)
+                                </label>
+                                <input type="file" class="form-control" id="imageUpload" 
+                                       accept="image/*" multiple>
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    يمكنك رفع صورة أو أكثر لإرسالها مع الرسالة النصية
+                                </div>
+                                
+                                <!-- معاينة الصور المرفوعة -->
+                                <div id="imagePreview" class="mt-2" style="display: none;">
+                                    <h6><i class="fas fa-eye me-2"></i>الصور المحددة:</h6>
+                                    <div id="imagePreviewContainer" class="d-flex flex-wrap gap-2"></div>
+                                    <button type="button" class="btn btn-sm btn-danger mt-2" id="clearImages">
+                                        <i class="fas fa-trash me-1"></i>مسح جميع الصور
+                                    </button>
+                                </div>
+                            </div>
+
                             <div class="mb-3">
                                 <label for="groups" class="form-label">مجموعات الإرسال</label>
                                 <textarea class="form-control" id="groups" rows="4"
@@ -704,7 +726,6 @@
     <!-- PWA و Service Worker -->
     <script>
         // متغيرات PWA
-        let deferredPrompt;
         const installAppBtn = document.getElementById('installAppBtn');
 
         // تسجيل Service Worker
@@ -877,6 +898,52 @@
         
         let currentUserId = '{{ current_user.id }}';
         
+        // دالة عرض الإشعارات
+        function showNotification(message, type = 'info', duration = 5000) {
+            try {
+                const notification = document.createElement('div');
+                notification.className = `alert alert-${getBootstrapAlertClass(type)} alert-dismissible fade show position-fixed`;
+                notification.style.cssText = 'top: 80px; right: 20px; z-index: 1060; max-width: 400px; min-width: 300px;';
+                
+                notification.innerHTML = `
+                    <strong>${getNotificationIcon(type)}</strong>
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+
+                document.body.appendChild(notification);
+
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                }, duration);
+
+            } catch (error) {
+                console.error('Error showing notification:', error);
+            }
+        }
+
+        function getBootstrapAlertClass(type) {
+            const classes = {
+                'success': 'success',
+                'error': 'danger', 
+                'warning': 'warning',
+                'info': 'info'
+            };
+            return classes[type] || 'info';
+        }
+
+        function getNotificationIcon(type) {
+            const icons = {
+                'success': '✅',
+                'error': '❌',
+                'warning': '⚠️',
+                'info': 'ℹ️'
+            };
+            return icons[type] || 'ℹ️';
+        }
+        
         // معالجة النقر على أزرار المستخدمين
         document.addEventListener('DOMContentLoaded', function() {
             const userTabs = document.querySelectorAll('.user-tab');
@@ -911,9 +978,37 @@
             
             showNotification('جاري التبديل إلى ' + tab.textContent.trim() + '...', 'info');
             
-            // إرسال طلب التبديل عبر Socket.IO
-            socket.emit('switch_user', {
-                user_id: userId
+            // إرسال طلب التبديل عبر fetch API
+            fetch('/api/switch_user', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    user_id: userId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    currentUserId = userId;
+                    updateUserTabs(userId);
+                    showNotification(data.message, 'success');
+                    
+                    // إعادة تحميل الصفحة لعرض بيانات المستخدم الجديد
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    showNotification(data.message, 'error');
+                    // إعادة تفعيل الأزرار عند الفشل
+                    allTabs.forEach(t => t.disabled = false);
+                }
+            })
+            .catch(error => {
+                console.error('Error switching user:', error);
+                showNotification('خطأ في التبديل', 'error');
+                allTabs.forEach(t => t.disabled = false);
             });
         }
         

@@ -1212,13 +1212,34 @@ def index():
         session['user_id'] = "user_1"
 
     user_id = session['user_id']
+    
+    # تحميل إعدادات المستخدم الحالي (قد تكون فارغة للمستخدمين الجدد)
     settings = load_settings(user_id)
     connection_status = "disconnected"
 
+    # التأكد من وجود بيانات المستخدم في الذاكرة
     with USERS_LOCK:
-        if user_id in USERS:
-            connected = USERS[user_id].get('connected', False)
-            connection_status = "connected" if connected else "disconnected"
+        if user_id not in USERS:
+            # إنشاء بيانات افتراضية للمستخدم إذا لم تكن موجودة
+            USERS[user_id] = {
+                'client_manager': None,
+                'settings': settings,
+                'thread': None,
+                'is_running': False,
+                'stats': {"sent": 0, "errors": 0},
+                'connected': False,
+                'authenticated': False,
+                'awaiting_code': False,
+                'awaiting_password': False,
+                'phone_code_hash': None,
+                'monitoring_active': False,
+                'event_handlers_registered': False
+            }
+        
+        # الحصول على حالة الاتصال للمستخدم الحالي
+        user_data = USERS[user_id]
+        connected = user_data.get('connected', False)
+        connection_status = "connected" if connected else "disconnected"
 
     # إضافة عنوان التطبيق
     app_title = "مركز سرعة انجاز 📚للخدمات الطلابية والاكاديمية"
@@ -1709,7 +1730,7 @@ def api_user_logout():
 
 @app.route("/api/switch_user", methods=["POST"])
 def api_switch_user():
-    """التبديل إلى مستخدم آخر من المستخدمين الخمسة"""
+    """التبديل إلى مستخدم آخر من المستخدمين الخمسة مع الحفاظ على حالة كل مستخدم"""
     try:
         data = request.get_json()
         new_user_id = data.get('user_id')
@@ -1722,16 +1743,28 @@ def api_switch_user():
         
         old_user_id = session.get('user_id', 'user_1')
         
+        # التأكد من وجود بيانات المستخدم الجديد
+        with USERS_LOCK:
+            if new_user_id not in USERS:
+                # إنشاء بيانات فارغة للمستخدم الجديد
+                USERS[new_user_id] = {
+                    'client_manager': None,
+                    'settings': load_settings(new_user_id),
+                    'thread': None,
+                    'is_running': False,
+                    'stats': {"sent": 0, "errors": 0},
+                    'connected': False,
+                    'authenticated': False,
+                    'awaiting_code': False,
+                    'awaiting_password': False,
+                    'phone_code_hash': None,
+                    'monitoring_active': False,
+                    'event_handlers_registered': False
+                }
+        
         # تحديث الجلسة
         session['user_id'] = new_user_id
         session.permanent = True
-        
-        # إرسال إشعار التبديل
-        socketio.emit('user_switched', {
-            'current_user': new_user_id,
-            'user_name': PREDEFINED_USERS[new_user_id]['name'],
-            'message': f"تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']}"
-        }, to=request.sid if hasattr(request, 'sid') else None)
         
         logger.info(f"User switched from {old_user_id} to {new_user_id} via API")
         

@@ -1,36 +1,34 @@
-
 // =========================== 
 // متغيرات عامة
 // ===========================
 let socket;
 let currentUserId = document.querySelector('script')?.textContent?.match(/currentUserId = '([^']+)'/)?.[1] || 'user_1';
 let extractedLinks = [];
-let deferredPrompt;
 
 // =========================== 
 // تهيئة Socket.IO والتطبيق
 // ===========================
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Initializing application...');
-    
+
     // تهيئة Socket.IO
     initializeSocket();
-    
+
     // تهيئة النماذج والأحداث
     initializeForms();
-    
+
     // تهيئة نظام المستخدمين
     initializeUserSystem();
-    
+
     // تهيئة نظام الانضمام التلقائي
     initializeAutoJoinSystem();
-    
+
     // تهيئة PWA
     initializePWA();
-    
+
     // فحص حالة تسجيل الدخول
     checkLoginStatus();
-    
+
     console.log('✅ Application initialized successfully');
 });
 
@@ -203,7 +201,7 @@ function showNotification(message, type = 'info', duration = 5000) {
         const notification = document.createElement('div');
         notification.className = `alert alert-${getBootstrapAlertClass(type)} alert-dismissible fade show position-fixed`;
         notification.style.cssText = 'top: 80px; right: 20px; z-index: 1060; max-width: 400px; min-width: 300px;';
-        
+
         notification.innerHTML = `
             <strong>${getNotificationIcon(type)}</strong>
             ${message}
@@ -257,21 +255,21 @@ function getNotificationIcon(type) {
 // ===========================
 function handleLogin(e) {
     e.preventDefault();
-    
+
     const phone = document.getElementById('phone').value.trim();
     const password = document.getElementById('password').value.trim();
-    
+
     if (!phone) {
         showNotification('يرجى إدخال رقم الهاتف', 'warning');
         return;
     }
-    
+
     const submitBtn = document.getElementById('loginBtn');
     const originalText = submitBtn.innerHTML;
-    
+
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>جاري تسجيل الدخول...';
-    
+
     fetch('/api/save_login', {
         method: 'POST',
         headers: {
@@ -286,10 +284,10 @@ function handleLogin(e) {
     .then(data => {
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
-        
+
         if (data.success) {
             showNotification(data.message, 'success');
-            
+
             if (data.code_required) {
                 showVerificationForm();
             } else {
@@ -315,14 +313,14 @@ function handleLogin(e) {
 
 function handleVerifyCode(e) {
     e.preventDefault();
-    
+
     const code = document.getElementById('verificationCode').value.trim();
-    
+
     if (!code) {
         showNotification('يرجى إدخال كود التحقق', 'warning');
         return;
     }
-    
+
     fetch('/api/verify_code', {
         method: 'POST',
         headers: {
@@ -334,7 +332,7 @@ function handleVerifyCode(e) {
     .then(data => {
         if (data.success) {
             showNotification(data.message, 'success');
-            
+
             if (data.password_required) {
                 showPasswordForm();
             } else {
@@ -359,14 +357,14 @@ function handleVerifyCode(e) {
 
 function handleVerifyPassword(e) {
     e.preventDefault();
-    
+
     const password = document.getElementById('twoFactorPassword').value.trim();
-    
+
     if (!password) {
         showNotification('يرجى إدخال كلمة المرور', 'warning');
         return;
     }
-    
+
     fetch('/api/verify_code', {
         method: 'POST',
         headers: {
@@ -420,7 +418,7 @@ function hideVerificationForms() {
 function updateLoginStatus(data) {
     const sessionControls = document.getElementById('sessionControls');
     const loginButtonContainer = document.getElementById('loginButtonContainer');
-    
+
     if (data.logged_in) {
         if (sessionControls) sessionControls.style.display = 'block';
         if (loginButtonContainer) loginButtonContainer.className = 'col-md-6 mb-2';
@@ -428,10 +426,10 @@ function updateLoginStatus(data) {
         if (sessionControls) sessionControls.style.display = 'none';
         if (loginButtonContainer) loginButtonContainer.className = 'col-md-6 mb-2';
     }
-    
+
     // تحديث مؤشر الحالة
     updateConnectionStatus(data.connected ? 'connected' : 'disconnected');
-    
+
     // تحديث أزرار المراقبة
     updateMonitoringButtons(data.is_running || false);
 }
@@ -439,7 +437,7 @@ function updateLoginStatus(data) {
 function updateConnectionStatus(status) {
     const statusElements = document.querySelectorAll('#connectionStatus, #connectionStatusHeader');
     const isConnected = status === 'connected';
-    
+
     statusElements.forEach(element => {
         if (element) {
             element.className = `badge ${isConnected ? 'bg-success' : 'bg-danger'}`;
@@ -451,7 +449,7 @@ function updateConnectionStatus(status) {
 function updateMonitoringButtons(isRunning) {
     const startBtn = document.getElementById('startMonitoringBtn');
     const stopBtn = document.getElementById('stopMonitoringBtn');
-    
+
     if (startBtn && stopBtn) {
         if (isRunning) {
             startBtn.style.display = 'none';
@@ -482,19 +480,19 @@ function updateMonitoringIndicator(data) {
 function addLogEntry(message, type = 'info') {
     const logContainer = document.getElementById('operationsLog');
     if (!logContainer) return;
-    
+
     const entry = document.createElement('div');
     entry.className = `log-entry log-${type}`;
-    
+
     const timestamp = new Date().toLocaleTimeString('ar-SA');
     entry.innerHTML = `
         <span class="log-time">[${timestamp}]</span>
         ${message}
     `;
-    
+
     logContainer.appendChild(entry);
     logContainer.scrollTop = logContainer.scrollHeight;
-    
+
     // الاحتفاظ بآخر 100 رسالة فقط
     const entries = logContainer.children;
     if (entries.length > 100) {
@@ -505,14 +503,14 @@ function addLogEntry(message, type = 'info') {
 function addConsoleEntry(message) {
     const consoleContainer = document.getElementById('consoleLog');
     if (!consoleContainer) return;
-    
+
     const entry = document.createElement('div');
     entry.className = 'console-line';
     entry.textContent = message;
-    
+
     consoleContainer.appendChild(entry);
     consoleContainer.scrollTop = consoleContainer.scrollHeight;
-    
+
     // الاحتفاظ بآخر 50 رسالة فقط
     const entries = consoleContainer.children;
     if (entries.length > 50) {
@@ -534,30 +532,30 @@ let selectedImages = [];
 
 function handleImageUpload(e) {
     const files = Array.from(e.target.files);
-    
+
     if (files.length === 0) {
         return;
     }
-    
+
     // التحقق من حجم وأنواع الملفات
     const validFiles = [];
     const maxSize = 10 * 1024 * 1024; // 10MB
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    
+
     files.forEach(file => {
         if (!validTypes.includes(file.type)) {
             showNotification(`نوع الملف غير مدعوم: ${file.name}`, 'warning');
             return;
         }
-        
+
         if (file.size > maxSize) {
             showNotification(`حجم الملف كبير جداً: ${file.name} (الحد الأقصى 10MB)`, 'warning');
             return;
         }
-        
+
         validFiles.push(file);
     });
-    
+
     if (validFiles.length > 0) {
         selectedImages = [...selectedImages, ...validFiles];
         displayImagePreview();
@@ -568,15 +566,15 @@ function handleImageUpload(e) {
 function displayImagePreview() {
     const preview = document.getElementById('imagePreview');
     const container = document.getElementById('imagePreviewContainer');
-    
+
     if (selectedImages.length === 0) {
         preview.style.display = 'none';
         return;
     }
-    
+
     preview.style.display = 'block';
     container.innerHTML = '';
-    
+
     selectedImages.forEach((file, index) => {
         const reader = new FileReader();
         reader.onload = function(e) {
@@ -624,7 +622,7 @@ async function convertImageToBase64(file) {
 // ===========================
 function handleSaveSettings(e) {
     e.preventDefault();
-    
+
     const formData = {
         message: document.getElementById('message').value.trim(),
         groups: document.getElementById('groups').value.trim(),
@@ -633,7 +631,7 @@ function handleSaveSettings(e) {
         interval_seconds: parseInt(document.getElementById('intervalSeconds').value) || 3600,
         scheduled_time: document.getElementById('scheduledTime').value
     };
-    
+
     fetch('/api/save_settings', {
         method: 'POST',
         headers: {
@@ -658,35 +656,35 @@ function handleSaveSettings(e) {
 async function sendNow() {
     const message = document.getElementById('message').value.trim();
     const groups = document.getElementById('groups').value.trim();
-    
+
     if (!message && selectedImages.length === 0) {
         showNotification('يرجى كتابة رسالة أو اختيار صورة للإرسال', 'warning');
         return;
     }
-    
+
     if (!groups) {
         showNotification('يرجى تحديد المجموعات للإرسال إليها', 'warning');
         return;
     }
-    
+
     const sendBtn = document.getElementById('sendNowBtn');
     const originalText = sendBtn.innerHTML;
-    
+
     try {
         sendBtn.disabled = true;
         sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>جاري الإرسال...';
-        
+
         // تحضير بيانات الإرسال
         const sendData = {
             message: message,
             groups: groups,
             images: []
         };
-        
+
         // تحويل الصور إلى Base64 إذا وجدت
         if (selectedImages.length > 0) {
             showNotification(`جاري تحضير ${selectedImages.length} صورة...`, 'info');
-            
+
             for (let i = 0; i < selectedImages.length; i++) {
                 const file = selectedImages[i];
                 try {
@@ -703,7 +701,7 @@ async function sendNow() {
                 }
             }
         }
-        
+
         const response = await fetch('/api/send_now', {
             method: 'POST',
             headers: {
@@ -711,9 +709,9 @@ async function sendNow() {
             },
             body: JSON.stringify(sendData)
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showNotification(data.message, 'success');
             // مسح الصور بعد الإرسال الناجح
@@ -723,7 +721,7 @@ async function sendNow() {
         } else {
             showNotification(data.message, 'error');
         }
-        
+
     } catch (error) {
         console.error('Send now error:', error);
         showNotification('خطأ في الإرسال', 'error');
@@ -737,7 +735,7 @@ function handleSendTypeChange() {
     const sendType = document.getElementById('sendType').value;
     const intervalDiv = document.getElementById('intervalDiv');
     const scheduledTimeDiv = document.getElementById('scheduledTimeDiv');
-    
+
     if (sendType === 'scheduled') {
         if (intervalDiv) intervalDiv.style.display = 'block';
         if (scheduledTimeDiv) scheduledTimeDiv.style.display = 'block';
@@ -801,7 +799,7 @@ function logout() {
     if (!confirm('هل أنت متأكد من تسجيل الخروج؟ سيتم إنهاء جلسة التليجرام نهائياً.')) {
         return;
     }
-    
+
     fetch('/api/user_logout', {
         method: 'POST',
         headers: {
@@ -827,7 +825,7 @@ function switchAccount() {
     if (!confirm('هل تريد تبديل الحساب؟ سيتم إنشاء جلسة جديدة.')) {
         return;
     }
-    
+
     fetch('/api/reset_login', {
         method: 'POST',
         headers: {
@@ -855,7 +853,7 @@ function switchAccount() {
 function updateStats(data) {
     const sentCount = document.getElementById('sentCount');
     const errorCount = document.getElementById('errorCount');
-    
+
     if (sentCount) sentCount.textContent = data.sent || 0;
     if (errorCount) errorCount.textContent = data.errors || 0;
 }
@@ -876,18 +874,18 @@ function checkLoginStatus() {
 // ===========================
 function initializeUserSystem() {
     const userTabs = document.querySelectorAll('.user-tab');
-    
+
     userTabs.forEach(function(tab) {
         tab.addEventListener('click', function(e) {
             e.preventDefault();
-            
+
             const newUserId = this.getAttribute('data-user-id');
-            
+
             if (newUserId === currentUserId) {
                 showNotification('أنت بالفعل في حساب ' + this.textContent.trim(), 'info');
                 return;
             }
-            
+
             switchToUser(newUserId);
         });
     });
@@ -899,13 +897,13 @@ function switchToUser(userId) {
         showNotification('مستخدم غير صحيح', 'error');
         return;
     }
-    
+
     // تعطيل جميع الأزرار مؤقتاً
     const allTabs = document.querySelectorAll('.user-tab');
     allTabs.forEach(t => t.disabled = true);
-    
+
     showNotification('جاري التبديل إلى ' + tab.textContent.trim() + '...', 'info');
-    
+
     // إرسال طلب التبديل عبر Socket.IO
     if (socket) {
         socket.emit('switch_user', {
@@ -916,10 +914,10 @@ function switchToUser(userId) {
 
 function updateUserTabs(activeUserId) {
     const userTabs = document.querySelectorAll('.user-tab');
-    
+
     userTabs.forEach(function(tab) {
         const userId = tab.getAttribute('data-user-id');
-        
+
         if (userId === activeUserId) {
             tab.classList.add('active');
             tab.disabled = false;
@@ -941,14 +939,14 @@ function updateFormFields(settings) {
             'sendType': settings.send_type,
             'intervalSeconds': settings.interval_seconds
         };
-        
+
         for (const [fieldId, value] of Object.entries(fields)) {
             const field = document.getElementById(fieldId);
             if (field && value) {
                 field.value = value;
             }
         }
-        
+
     } catch (error) {
         console.error('Error updating form fields:', error);
     }
@@ -960,14 +958,14 @@ function updateFormFields(settings) {
 function initializeAutoJoinSystem() {
     const autoJoinForm = document.getElementById('autoJoinForm');
     const startAutoJoinBtn = document.getElementById('startAutoJoinBtn');
-    
+
     if (autoJoinForm) {
         autoJoinForm.addEventListener('submit', function(e) {
             e.preventDefault();
             extractLinks();
         });
     }
-    
+
     if (startAutoJoinBtn) {
         startAutoJoinBtn.addEventListener('click', function(e) {
             e.preventDefault();
@@ -978,14 +976,14 @@ function initializeAutoJoinSystem() {
 
 function extractLinks() {
     const text = document.getElementById('groupLinks').value.trim();
-    
+
     if (!text) {
         showNotification('يرجى إدخال روابط المجموعات أولاً', 'warning');
         return;
     }
-    
+
     showNotification('جاري استخراج الروابط...', 'info');
-    
+
     fetch('/api/extract_group_links', {
         method: 'POST',
         headers: {
@@ -1000,7 +998,7 @@ function extractLinks() {
         if (data.success) {
             extractedLinks = data.links || [];
             displayExtractedLinks(extractedLinks);
-            
+
             if (extractedLinks.length > 0) {
                 document.getElementById('startAutoJoinBtn').disabled = false;
                 showNotification(`تم استخراج ${extractedLinks.length} رابط`, 'success');
@@ -1020,14 +1018,14 @@ function extractLinks() {
 function displayExtractedLinks(links) {
     const container = document.getElementById('extractedLinksContainer');
     const list = document.getElementById('extractedLinksList');
-    
+
     if (links.length === 0) {
         container.style.display = 'none';
         return;
     }
-    
+
     let html = `<strong>تم العثور على ${links.length} رابط:</strong><br><br>`;
-    
+
     links.forEach((link, index) => {
         const icon = link.type === 'invite' ? '🔗' : '📢';
         html += `
@@ -1039,7 +1037,7 @@ function displayExtractedLinks(links) {
             </div>
         `;
     });
-    
+
     list.innerHTML = html;
     container.style.display = 'block';
 }
@@ -1049,18 +1047,18 @@ function startAutoJoin() {
         showNotification('يرجى استخراج الروابط أولاً', 'warning');
         return;
     }
-    
+
     // تعطيل الزر لمنع النقر المتكرر
     const startBtn = document.getElementById('startAutoJoinBtn');
     startBtn.disabled = true;
     startBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>جاري الانضمام...';
-    
+
     // إظهار حالة الانضمام
     document.getElementById('joinStatusContainer').style.display = 'block';
     document.getElementById('joinStatusText').textContent = 'بدء الانضمام التلقائي...';
-    
+
     showNotification(`بدء الانضمام التلقائي لـ ${extractedLinks.length} مجموعة...`, 'info');
-    
+
     fetch('/api/start_auto_join', {
         method: 'POST',
         headers: {
@@ -1093,7 +1091,7 @@ function resetAutoJoinButton() {
         startBtn.disabled = false;
         startBtn.innerHTML = '<i class="fas fa-play me-2"></i>بدء الانضمام التلقائي';
     }
-    
+
     const statusContainer = document.getElementById('joinStatusContainer');
     if (statusContainer) {
         statusContainer.style.display = 'none';
@@ -1115,12 +1113,12 @@ function updateJoinStats(data) {
 
 function handleAutoJoinCompleted(data) {
     resetAutoJoinButton();
-    
+
     showNotification(
         `تم الانتهاء! النجح: ${data.success}, فشل: ${data.fail}, منضم مسبقاً: ${data.already_joined}`,
         'info'
     );
-    
+
     if (data.success > 0) {
         showNotification(`🎉 تم الانضمام بنجاح لـ ${data.success} مجموعة جديدة!`, 'success');
     }
@@ -1146,7 +1144,7 @@ function initializePWA() {
     // معالجة حدث التثبيت
     window.addEventListener('beforeinstallprompt', function(e) {
         e.preventDefault();
-        deferredPrompt = e;
+        // deferredPrompt = e; // This line was removed as it was a duplicate declaration
 
         const installBtn = document.getElementById('installAppBtn');
         if (installBtn) {
@@ -1157,6 +1155,7 @@ function initializePWA() {
 }
 
 function installApp() {
+    // This function relies on the deferredPrompt variable which is now declared only once in initializePWA
     if (!deferredPrompt) {
         showNotification('التطبيق مثبت بالفعل أو غير متاح للتثبيت', 'info');
         return;
@@ -1187,9 +1186,9 @@ function showKeywordAlert(data) {
         <p><strong>الرسالة:</strong> ${data.message}</p>
         <button type="button" class="btn btn-sm btn-secondary" onclick="this.parentElement.remove()">إغلاق</button>
     `;
-    
+
     document.getElementById('alertContainer').appendChild(alertDiv);
-    
+
     // إزالة تلقائية بعد 10 ثوان
     setTimeout(() => {
         if (alertDiv.parentNode) {
