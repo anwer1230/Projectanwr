@@ -178,13 +178,11 @@ function initializeForms() {
     const stopBtn = document.getElementById('stopMonitoringBtn');
     const sendBtn = document.getElementById('sendNowBtn');
     const logoutBtn = document.getElementById('logoutButton');
-    const resetBtn = document.getElementById('switchAccountButton');
 
     if (startBtn) startBtn.addEventListener('click', startMonitoring);
     if (stopBtn) stopBtn.addEventListener('click', stopMonitoring);
     if (sendBtn) sendBtn.addEventListener('click', sendNow);
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
-    if (resetBtn) resetBtn.addEventListener('click', switchAccount);
 
     // تغيير نوع الإرسال
     const sendTypeSelect = document.getElementById('sendType');
@@ -557,10 +555,11 @@ function handleImageUpload(e) {
         validFiles.push(file);
     });
 
+    // إضافة الملفات الجديدة للملفات المحددة مسبقاً
     if (validFiles.length > 0) {
         selectedImages = [...selectedImages, ...validFiles];
         displayImagePreview();
-        showNotification(`تم اختيار ${validFiles.length} صورة`, 'success');
+        showNotification(`تم اختيار ${validFiles.length} صورة جديدة. المجموع: ${selectedImages.length}`, 'success');
     }
 }
 
@@ -580,15 +579,18 @@ function displayImagePreview() {
         const reader = new FileReader();
         reader.onload = function(e) {
             const imageDiv = document.createElement('div');
-            imageDiv.className = 'position-relative';
+            imageDiv.className = 'position-relative d-inline-block m-2';
             imageDiv.innerHTML = `
                 <img src="${e.target.result}" class="img-thumbnail" 
-                     style="width: 100px; height: 100px; object-fit: cover;">
-                <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0" 
-                        onclick="removeImage(${index})" style="font-size: 0.7rem; padding: 2px 6px;">
+                     style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px;">
+                <button type="button" class="btn btn-danger btn-sm position-absolute" 
+                        onclick="removeImage(${index})" 
+                        style="top: -8px; right: -8px; font-size: 0.6rem; padding: 4px 6px; border-radius: 50%;">
                     <i class="fas fa-times"></i>
                 </button>
-                <small class="d-block text-center mt-1">${file.name}</small>
+                <small class="d-block text-center mt-1 text-truncate" style="max-width: 100px;" title="${file.name}">
+                    ${file.name.length > 12 ? file.name.substring(0, 12) + '...' : file.name}
+                </small>
             `;
             container.appendChild(imageDiv);
         };
@@ -822,31 +824,7 @@ function logout() {
     });
 }
 
-function switchAccount() {
-    if (!confirm('هل تريد تبديل الحساب؟ سيتم إنشاء جلسة جديدة.')) {
-        return;
-    }
 
-    fetch('/api/reset_login', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showNotification(data.message, 'success');
-            setTimeout(() => window.location.reload(), 1000);
-        } else {
-            showNotification(data.message, 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Switch account error:', error);
-        showNotification('خطأ في تبديل الحساب', 'error');
-    });
-}
 
 // =========================== 
 // دوال الإحصائيات

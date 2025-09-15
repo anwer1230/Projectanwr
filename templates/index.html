@@ -393,31 +393,15 @@
 
                                 <!-- أزرار إدارة الجلسة - تظهر بعد تسجيل الدخول -->
                                 <div class="col-md-6 mb-2" id="sessionControls" style="display: none;">
-                                    <div class="d-grid gap-2">
-                                        <button type="button" class="btn btn-danger btn-sm" id="logoutButton">
-                                            <i class="fas fa-sign-out-alt me-1"></i>تسجيل الخروج
-                                        </button>
-                                        <button type="button" class="btn btn-warning btn-sm" id="switchAccountButton">
-                                            <i class="fas fa-user-cog me-1"></i>تبديل الحساب
-                                        </button>
-                                    </div>
-                                    <small class="text-muted d-block mt-1">
+                                    <button type="button" class="btn btn-danger w-100" id="logoutButton">
+                                        <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                                    </button>
+                                    <small class="text-muted d-block mt-1 text-center">
                                         <i class="fas fa-info-circle me-1"></i>
-                                        خروج: إنهاء نهائي | تبديل: جلسة جديدة
+                                        إنهاء جلسة التليجرام نهائياً
                                     </small>
                                 </div>
-                                <div class="col-md-3 mb-2">
-                                    <button type="button" class="btn btn-warning w-100" id="resetBtn" style="display: none;">
-                                        <i class="fas fa-redo me-1"></i>
-                                        إعادة تعيين
-                                    </button>
-                                </div>
-                                <div class="col-md-3 mb-2">
-                                    <button type="button" class="btn btn-danger w-100" id="logoutBtn" style="display: none;">
-                                        <i class="fas fa-sign-out-alt me-1"></i>
-                                        خروج
-                                    </button>
-                                </div>
+                                
                             </div>
                         </form>
 
@@ -555,28 +539,6 @@
                                 <label for="message" class="form-label">الرسالة</label>
                                 <textarea class="form-control" id="message" rows="3"
                                           placeholder="اكتب الرسالة المراد إرسالها">{{ settings.message or '' }}</textarea>
-                            </div>
-
-                            <!-- قسم رفع الصور -->
-                            <div class="mb-3">
-                                <label for="imageUpload" class="form-label">
-                                    <i class="fas fa-image me-2"></i>رفع صورة مع الرسالة (اختياري)
-                                </label>
-                                <input type="file" class="form-control" id="imageUpload" 
-                                       accept="image/*" multiple>
-                                <div class="form-text">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    يمكنك رفع صورة أو أكثر لإرسالها مع الرسالة النصية
-                                </div>
-                                
-                                <!-- معاينة الصور المرفوعة -->
-                                <div id="imagePreview" class="mt-2" style="display: none;">
-                                    <h6><i class="fas fa-eye me-2"></i>الصور المحددة:</h6>
-                                    <div id="imagePreviewContainer" class="d-flex flex-wrap gap-2"></div>
-                                    <button type="button" class="btn btn-sm btn-danger mt-2" id="clearImages">
-                                        <i class="fas fa-trash me-1"></i>مسح جميع الصور
-                                    </button>
-                                </div>
                             </div>
 
                             <!-- قسم رفع الصور -->
