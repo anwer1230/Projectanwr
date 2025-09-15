@@ -7,7 +7,7 @@ channel = "stable-25_05"
 packages = ["openssl", "unzip"]
 
 [workflows]
-runButton = "Telegram Monitor Server Updated"
+runButton = "Project"
 
 [[workflows.workflow]]
 name = "Project"
@@ -22,13 +22,13 @@ args = "Telegram Monitor Server"
 name = "Telegram Monitor Server"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python app.py"
 waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[workflows.workflow]]
 name = "Telegram Monitor Server Fixed"
@@ -53,5 +53,5 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 5001
+localPort = 46371
 externalPort = 3000

@@ -48,14 +48,45 @@ SESSIONS_DIR = "sessions"
 if not os.path.exists(SESSIONS_DIR):
     os.makedirs(SESSIONS_DIR)
 
+# نظام المستخدمين الخمسة المحددين مسبقاً
+PREDEFINED_USERS = {
+    "user_1": {
+        "id": "user_1",
+        "name": "المستخدم الأول",
+        "icon": "fas fa-user",
+        "color": "#007bff"
+    },
+    "user_2": {
+        "id": "user_2", 
+        "name": "المستخدم الثاني",
+        "icon": "fas fa-user-tie",
+        "color": "#28a745"
+    },
+    "user_3": {
+        "id": "user_3",
+        "name": "المستخدم الثالث", 
+        "icon": "fas fa-user-graduate",
+        "color": "#ffc107"
+    },
+    "user_4": {
+        "id": "user_4",
+        "name": "المستخدم الرابع",
+        "icon": "fas fa-user-cog",
+        "color": "#dc3545"
+    },
+    "user_5": {
+        "id": "user_5",
+        "name": "المستخدم الخامس",
+        "icon": "fas fa-user-astronaut", 
+        "color": "#6f42c1"
+    }
+}
+
 # معالجات الأخطاء الشاملة
 @app.errorhandler(404)
 def not_found_error(error):
     try:
-        return render_template('index.html', 
-                              settings={}, 
-                              connection_status='disconnected',
-                              app_title="مركز سرعة انجاز 📚للخدمات الطلابية والاكاديمية"), 404
+        return jsonify({"error": "Page not found"}), 404
     except Exception as e:
         logger.error(f"Error in 404 handler: {str(e)}")
         return jsonify({"error": "Page not found"}), 404
@@ -93,18 +124,6 @@ def default_error_handler(e):
 
 USERS = {}
 USERS_LOCK = Lock()
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
-if not ADMIN_PASSWORD:
-    ADMIN_PASSWORD = "admin123"  # Default for development
-    logger.warning("⚠️ يتم استخدام كلمة مرور افتراضية - يرجى إضافة ADMIN_PASSWORD في متغيرات البيئة للإنتاج")
-
-# بيانات المدير العامة
-ADMIN_DATA = {
-    'used_links': [],  # قائمة الروابط المستخدمة
-    'alerts_log': [],  # سجل التنبيهات
-    'stats': {'total_messages': 0, 'total_alerts': 0}
-}
-ADMIN_DATA_LOCK = Lock()
 
 # بيانات Telegram API
 API_ID = os.environ.get('TELEGRAM_API_ID')
@@ -173,50 +192,11 @@ class AlertQueue:
                 "message": f"🚨 تنبيه فوري: '{alert_data['keyword']}' في {alert_data['group']}"
             }, to=user_id)
 
-            # تسجيل التنبيه للمدير
-            self._log_alert_for_admin(user_id, alert_data)
-
             # إرسال للرسائل المحفوظة
             self._send_to_saved_messages(user_id, alert_data)
 
         except Exception as e:
             logger.error(f"Failed to send alert for user {user_id}: {str(e)}")
-
-    def _log_alert_for_admin(self, user_id, alert_data):
-        """تسجيل التنبيه في بيانات المدير"""
-        try:
-            with ADMIN_DATA_LOCK:
-                # الحصول على معلومات المستخدم
-                user_phone = "غير معروف"
-                with USERS_LOCK:
-                    if user_id in USERS:
-                        user_phone = USERS[user_id]['settings'].get('phone', 'غير معروف')
-
-                # إنشاء سجل التنبيه
-                admin_alert = {
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'user_id': user_id[:8] + "...",
-                    'user_phone': user_phone,
-                    'keyword': alert_data['keyword'],
-                    'group': alert_data['group'],
-                    'message': alert_data.get('message', '')[:100] + "..." if len(alert_data.get('message', '')) > 100 else alert_data.get('message', ''),
-                    'sender': alert_data.get('sender', 'غير معروف'),
-                    'message_time': alert_data.get('message_time', ''),
-                    'full_message': alert_data.get('full_message', '')
-                }
-
-                # إضافة للقائمة (الاحتفاظ بآخر 500 تنبيه)
-                ADMIN_DATA['alerts_log'].insert(0, admin_alert)
-                if len(ADMIN_DATA['alerts_log']) > 500:
-                    ADMIN_DATA['alerts_log'] = ADMIN_DATA['alerts_log'][:500]
-
-                ADMIN_DATA['stats']['total_alerts'] += 1
-
-                # إرسال التحديث للمدير إذا كان متصلاً
-                socketio.emit('admin_alert_update', admin_alert, to='admin_room')
-
-        except Exception as e:
-            logger.error(f"Failed to log alert for admin: {str(e)}")
 
     def _send_to_saved_messages(self, user_id, alert_data):
         """إرسال التنبيه للرسائل المحفوظة"""
@@ -779,51 +759,12 @@ class TelegramManager:
                 client_manager.client.send_message(entity_obj, message)
             )
 
-            # تسجيل الرابط المستخدم للمدير
-            self._log_used_link_for_admin(user_id, entity, message, True)
-
             return {"success": True, "message_id": result.id}
 
         except Exception as e:
             logger.error(f"Send message error: {str(e)}")
-            # تسجيل الرابط حتى لو فشل الإرسال
-            self._log_used_link_for_admin(user_id, entity, message, False)
             raise Exception(str(e))
 
-    def _log_used_link_for_admin(self, user_id, entity, message, success):
-        """تسجيل الرابط المستخدم في بيانات المدير"""
-        try:
-            with ADMIN_DATA_LOCK:
-                # الحصول على معلومات المستخدم
-                user_phone = "غير معروف"
-                with USERS_LOCK:
-                    if user_id in USERS:
-                        user_phone = USERS[user_id]['settings'].get('phone', 'غير معروف')
-
-                # إنشاء سجل الرابط
-                link_log = {
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'user_id': user_id[:8] + "...",
-                    'user_phone': user_phone,
-                    'link': entity,
-                    'message': message[:50] + "..." if len(message) > 50 else message,
-                    'success': success,
-                    'status': 'نجح' if success else 'فشل'
-                }
-
-                # إضافة للقائمة (الاحتفاظ بآخر 1000 رابط)
-                ADMIN_DATA['used_links'].insert(0, link_log)
-                if len(ADMIN_DATA['used_links']) > 1000:
-                    ADMIN_DATA['used_links'] = ADMIN_DATA['used_links'][:1000]
-
-                if success:
-                    ADMIN_DATA['stats']['total_messages'] += 1
-
-                # إرسال التحديث للمدير إذا كان متصلاً
-                socketio.emit('admin_link_update', link_log, to='admin_room')
-
-        except Exception as e:
-            logger.error(f"Failed to log used link for admin: {str(e)}")
 
 # إنشاء مدير التليجرام
 telegram_manager = TelegramManager()
@@ -1002,23 +943,109 @@ def execute_scheduled_messages(user_id, settings):
 @socketio.on('connect')
 def handle_connect():
     try:
+        # إذا لم يكن هناك user_id، نستخدم المستخدم الأول كافتراضي
         if 'user_id' not in session:
-            session['user_id'] = str(uuid.uuid4())
+            session['user_id'] = "user_1"  # المستخدم الافتراضي
             session.permanent = True
 
         user_id = session['user_id']
+        
+        # التأكد من أن المستخدم ضمن المستخدمين المحددين مسبقاً
+        if user_id not in PREDEFINED_USERS:
+            user_id = "user_1"  # الافتراضي إذا لم يكن مستخدماً صحيحاً
+            session['user_id'] = user_id
+            
         join_room(user_id)
-        logger.info(f"User {user_id} connected via socket")
+        logger.info(f"User {user_id} ({PREDEFINED_USERS[user_id]['name']}) connected via socket")
 
-        # إرسال إشارة اتصال فورية
+        # إرسال إشارة اتصال فورية مع معلومات المستخدم
         emit('connection_confirmed', {
             'status': 'connected',
-            'user_id': user_id[:8] + '...',
+            'user_id': user_id,
+            'user_name': PREDEFINED_USERS[user_id]['name'],
             'timestamp': time.strftime('%H:%M:%S')
         })
+        
+        # إرسال قائمة المستخدمين المتاحين
+        emit('users_list', {
+            'current_user': user_id,
+            'users': PREDEFINED_USERS
+        })
+        
     except Exception as e:
         logger.error(f"Connection error: {str(e)}")
         emit('connection_error', {'message': str(e)})
+
+# دالة Socket.IO للتبديل بين المستخدمين
+@socketio.on('switch_user')
+def handle_switch_user(data):
+    """التبديل إلى مستخدم مختلف"""
+    try:
+        new_user_id = data.get('user_id')
+        
+        if not new_user_id or new_user_id not in PREDEFINED_USERS:
+            emit('error', {'message': 'مستخدم غير صحيح'})
+            return
+            
+        # مغادرة الغرفة القديمة
+        old_user_id = session.get('user_id', 'user_1')
+        leave_room(old_user_id)
+        
+        # تحديث الجلسة
+        session['user_id'] = new_user_id
+        session.permanent = True
+        
+        # الانضمام للغرفة الجديدة
+        join_room(new_user_id)
+        
+        logger.info(f"User switched from {old_user_id} to {new_user_id}")
+        
+        # إرسال تأكيد التبديل
+        emit('user_switched', {
+            'current_user': new_user_id,
+            'user_name': PREDEFINED_USERS[new_user_id]['name'],
+            'message': f"تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']}"
+        })
+        
+        # إرسال حالة المستخدم الجديد
+        user_id = new_user_id
+        with USERS_LOCK:
+            if user_id in USERS:
+                connected = USERS[user_id].get('connected', False)
+                authenticated = USERS[user_id].get('authenticated', False)
+                awaiting_code = USERS[user_id].get('awaiting_code', False)
+                awaiting_password = USERS[user_id].get('awaiting_password', False)
+                is_running = USERS[user_id].get('is_running', False)
+                
+                emit('connection_status', {
+                    "status": "connected" if connected else "disconnected"
+                })
+                
+                emit('login_status', {
+                    "logged_in": authenticated,
+                    "connected": connected,
+                    "awaiting_code": awaiting_code,
+                    "awaiting_password": awaiting_password,
+                    "is_running": is_running
+                })
+                
+                # إرسال إعدادات المستخدم
+                settings = load_settings(user_id)
+                emit('user_settings', settings)
+            else:
+                # إرسال حالة افتراضية للمستخدم الجديد
+                emit('connection_status', {"status": "disconnected"})
+                emit('login_status', {
+                    "logged_in": False,
+                    "connected": False,
+                    "awaiting_code": False,
+                    "awaiting_password": False,
+                    "is_running": False
+                })
+                
+    except Exception as e:
+        logger.error(f"Error switching user: {str(e)}")
+        emit('error', {'message': f'خطأ في التبديل: {str(e)}'})
 
     # إرسال حالة الاتصال فوراً
     with USERS_LOCK:
@@ -1050,18 +1077,6 @@ def handle_connect():
         "message": f"🔄 تم الاتصال بالخادم - {time.strftime('%H:%M:%S')}"
     })
 
-    # التحقق من المدير
-    if session.get('is_admin'):
-        join_room('admin_room')
-        logger.info("Admin connected via socket")
-
-        # إرسال البيانات الحالية للمدير
-        with ADMIN_DATA_LOCK:
-            emit('admin_initial_data', {
-                'used_links': ADMIN_DATA['used_links'][:50],  # آخر 50 رابط
-                'alerts_log': ADMIN_DATA['alerts_log'][:50],  # آخر 50 تنبيه
-                'stats': ADMIN_DATA['stats']
-            })
 
 @socketio.on('disconnect')
 def handle_disconnect(data=None):
@@ -1075,9 +1090,13 @@ def handle_disconnect(data=None):
 # ===========================
 @app.route("/")
 def index():
+    # إنشاء أو التحقق من user_id مع نظام المستخدمين الخمسة
     if 'user_id' not in session:
-        session['user_id'] = str(uuid.uuid4())
+        session['user_id'] = "user_1"  # المستخدم الافتراضي
         session.permanent = True
+    elif session['user_id'] not in PREDEFINED_USERS:
+        # إذا كان المستخدم غير صالح، استخدم الافتراضي
+        session['user_id'] = "user_1"
 
     user_id = session['user_id']
     settings = load_settings(user_id)
@@ -1092,11 +1111,16 @@ def index():
     app_title = "مركز سرعة انجاز 📚للخدمات الطلابية والاكاديمية"
     whatsapp_link = "https://wa.me/+966510349663"
 
+    # إضافة معلومات المستخدم الحالي والمستخدمين المتاحين
+    current_user = PREDEFINED_USERS[user_id]
+
     response = render_template('index.html',
                           settings=settings,
                           connection_status=connection_status,
-                         app_title=app_title,
-                         whatsapp_link=whatsapp_link)
+                          app_title=app_title,
+                          whatsapp_link=whatsapp_link,
+                          current_user=current_user,
+                          predefined_users=PREDEFINED_USERS)
 
     # إنشاء response object مع headers لمنع التخزين المؤقت
     from flask import make_response
@@ -1145,11 +1169,6 @@ def fresh():
 
     return resp
 
-@app.route("/admin")
-def admin():
-    if not session.get('is_admin'):
-        return redirect('/admin_login')
-
 # معالجات heartbeat
 @socketio.on('heartbeat')
 def handle_heartbeat(data):
@@ -1162,31 +1181,6 @@ def handle_heartbeat(data):
             })
     except Exception as e:
         logger.error(f"Heartbeat error: {str(e)}")
-
-
-
-    with USERS_LOCK:
-        users_data = {}
-        for user_id, data in USERS.items():
-            users_data[user_id] = {
-                'settings': data['settings'],
-                'is_running': data['is_running'],
-                'stats': data['stats'],
-                'connected': data.get('connected', False)
-            }
-
-    return render_template('admin.html', users=users_data)
-
-@app.route("/admin_login", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "GET":
-        return render_template('admin_login.html')
-
-    if request.form.get('password') == ADMIN_PASSWORD:
-        session['is_admin'] = True
-        return redirect('/admin')
-
-    return render_template('admin_login.html', error="كلمة المرور غير صحيحة")
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
@@ -1504,7 +1498,7 @@ def api_save_settings():
 
 @app.route("/api/user_logout", methods=["POST"])
 def api_user_logout():
-    """تسجيل الخروج وإنهاء الجلسة نهائياً"""
+    """تسجيل الخروج وإنهاء جلسة التليجرام مع الحفاظ على هوية المستخدم"""
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({
@@ -1513,89 +1507,137 @@ def api_user_logout():
         })
 
     try:
+        logger.info(f"User {user_id} logging out...")
+        
         with USERS_LOCK:
             if user_id in USERS:
-                # إيقاف العميل
+                # إيقاف العميل والمراقبة
                 client_manager = USERS[user_id].get('client_manager')
                 if client_manager:
                     try:
+                        # إيقاف المراقبة أولاً
+                        if USERS[user_id].get('is_running', False):
+                            USERS[user_id]['is_running'] = False
+                            
+                        # قطع الاتصال وإيقاف العميل
                         if hasattr(client_manager, 'client') and client_manager.client:
                             client_manager.client.disconnect()
+                            logger.info(f"Client disconnected for user {user_id}")
+                            
+                        # إيقاف thread إذا كان يعمل
+                        if hasattr(client_manager, 'stop'):
+                            client_manager.stop()
+                            
                     except Exception as e:
-                        print(f"خطأ في إغلاق العميل: {e}")
+                        logger.error(f"خطأ في إغلاق العميل للمستخدم {user_id}: {e}")
 
                 # حذف بيانات المستخدم من الذاكرة
                 del USERS[user_id]
+                logger.info(f"User data removed from memory for {user_id}")
 
-        # مسح الجلسة
-        session.clear()
+        # مسح ملفات جلسة التليجرام
+        session_file = os.path.join(SESSIONS_DIR, f"{user_id}_session.session")
+        if os.path.exists(session_file):
+            try:
+                os.remove(session_file)
+                logger.info(f"Session file removed for {user_id}")
+            except Exception as e:
+                logger.error(f"خطأ في حذف ملف الجلسة: {e}")
+        
+        # مسح إعدادات المستخدم (اختياري - قد تريد الاحتفاظ بها)
+        settings_file = os.path.join(SESSIONS_DIR, f"{user_id}.json")
+        if os.path.exists(settings_file):
+            try:
+                # لا نحذف الإعدادات، نفرغ البيانات الحساسة فقط
+                settings = load_settings(user_id)
+                settings.update({
+                    'phone': '',
+                    'authenticated': False,
+                    'connected': False
+                })
+                save_settings(user_id, settings)
+                logger.info(f"Settings cleared for {user_id}")
+            except Exception as e:
+                logger.error(f"خطأ في مسح الإعدادات: {e}")
 
+        # إرسال إشعار مسح الجلسة
         socketio.emit('log_update', {
-            "message": "🚪 تم تسجيل الخروج وإنهاء الجلسة"
+            "message": "🚪 تم تسجيل الخروج وإنهاء جلسة التليجرام"
         }, to=user_id)
+        
+        socketio.emit('connection_status', {
+            "status": "disconnected"
+        }, to=user_id)
+        
+        socketio.emit('login_status', {
+            "logged_in": False,
+            "connected": False,
+            "awaiting_code": False,
+            "awaiting_password": False,
+            "is_running": False
+        }, to=user_id)
+
+        # لا نمسح session.clear() بل نحتفظ بهوية المستخدم
+        # session.clear()  - لا نستخدم هذا في النظام الجديد
+        
+        logger.info(f"User {user_id} logged out successfully")
 
         return jsonify({
             "success": True,
-            "message": "✅ تم تسجيل الخروج بنجاح"
+            "message": "✅ تم تسجيل الخروج وإنهاء جلسة التليجرام بنجاح"
         })
 
     except Exception as e:
+        logger.error(f"خطأ في تسجيل الخروج للمستخدم {user_id}: {str(e)}")
         return jsonify({
             "success": False,
             "message": f"❌ خطأ في تسجيل الخروج: {str(e)}"
         })
 
-@app.route("/api/switch_account", methods=["POST"])
-def api_switch_account():
-    """تبديل الحساب - بدء جلسة جديدة مع الاحتفاظ بالحالية"""
-    old_user_id = session.get('user_id')
-    if not old_user_id:
-        return jsonify({
-            "success": False,
-            "message": "❌ لا توجد جلسة نشطة"
-        })
-
+@app.route("/api/switch_user", methods=["POST"])
+def api_switch_user():
+    """التبديل إلى مستخدم آخر من المستخدمين الخمسة"""
     try:
-        # إنشاء معرف مستخدم جديد
-        new_user_id = str(uuid.uuid4())
+        data = request.get_json()
+        new_user_id = data.get('user_id')
+        
+        if not new_user_id or new_user_id not in PREDEFINED_USERS:
+            return jsonify({
+                "success": False,
+                "message": "❌ مستخدم غير صحيح"
+            })
+        
+        old_user_id = session.get('user_id', 'user_1')
+        
+        # تحديث الجلسة
         session['user_id'] = new_user_id
-
-        # إنشاء بيانات للمستخدم الجديد
-        with USERS_LOCK:
-            USERS[new_user_id] = {
-                'authenticated': False,
-                'awaiting_code': False,
-                'awaiting_password': False,
-                'is_running': False,
-                'settings': load_settings(new_user_id),
-                'alerts': []
-            }
-
-        # إرسال تحديث حالة تسجيل الدخول للجلسة الجديدة
-        socketio.emit('login_status', {
-            'logged_in': False,
-            'connected': False,
-            'awaiting_code': False,
-            'awaiting_password': False
-        }, to=new_user_id)
-
-        socketio.emit('log_update', {
-            "message": f"🔄 تم إنشاء جلسة جديدة. الجلسة السابقة ما زالت نشطة."
-        }, to=old_user_id)
-
-        socketio.emit('log_update', {
-            "message": "🆕 جلسة جديدة جاهزة - أدخل رقم هاتف جديد"
-        }, to=new_user_id)
-
+        session.permanent = True
+        
+        # إرسال إشعار التبديل
+        socketio.emit('user_switched', {
+            'current_user': new_user_id,
+            'user_name': PREDEFINED_USERS[new_user_id]['name'],
+            'message': f"تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']}"
+        }, to=request.sid if hasattr(request, 'sid') else None)
+        
+        logger.info(f"User switched from {old_user_id} to {new_user_id} via API")
+        
         return jsonify({
             "success": True,
-            "message": "✅ تم تبديل الحساب - أدخل رقم هاتف جديد"
+            "message": f"✅ تم التبديل إلى {PREDEFINED_USERS[new_user_id]['name']}",
+            "user": {
+                "id": new_user_id,
+                "name": PREDEFINED_USERS[new_user_id]['name'],
+                "icon": PREDEFINED_USERS[new_user_id]['icon'],
+                "color": PREDEFINED_USERS[new_user_id]['color']
+            }
         })
-
+        
     except Exception as e:
+        logger.error(f"Error in user switching API: {str(e)}")
         return jsonify({
             "success": False,
-            "message": f"❌ خطأ في تبديل الحساب: {str(e)}"
+            "message": f"❌ خطأ في التبديل: {str(e)}"
         })
 
 @app.route("/api/start_monitoring", methods=["POST"])
@@ -1900,38 +1942,79 @@ def api_get_user_info():
 
 @app.route("/api/reset_login", methods=["POST"])
 def api_reset_login():
-    user_id = session['user_id']
+    """إعادة تعيين جلسة تسجيل الدخول للمستخدم الحالي"""
+    user_id = session.get('user_id', 'user_1')
+    
+    if user_id not in PREDEFINED_USERS:
+        return jsonify({
+            "success": False,
+            "message": "❌ مستخدم غير صحيح"
+        })
+    
+    try:
+        logger.info(f"Resetting login for user {user_id}")
+        
+        with USERS_LOCK:
+            if user_id in USERS:
+                # إيقاف المراقبة إذا كانت تعمل
+                if USERS[user_id].get('is_running', False):
+                    USERS[user_id]['is_running'] = False
 
-    with USERS_LOCK:
-        if user_id in USERS:
-            if USERS[user_id]['is_running']:
-                USERS[user_id]['is_running'] = False
+                # إيقاف العميل
+                client_manager = USERS[user_id].get('client_manager')
+                if client_manager:
+                    try:
+                        if hasattr(client_manager, 'stop'):
+                            client_manager.stop()
+                        if hasattr(client_manager, 'client') and client_manager.client:
+                            client_manager.client.disconnect()
+                        logger.info(f"Client stopped and disconnected for user {user_id}")
+                    except Exception as e:
+                        logger.error(f"Error stopping client for {user_id}: {e}")
 
-            client_manager = USERS[user_id].get('client_manager')
-            if client_manager:
-                client_manager.stop()
+                # حذف بيانات المستخدم من الذاكرة
+                del USERS[user_id]
+                logger.info(f"User data removed from memory for {user_id}")
 
-            del USERS[user_id]
+        # مسح ملف جلسة التليجرام
+        session_file = os.path.join(SESSIONS_DIR, f"{user_id}_session.session")
+        if os.path.exists(session_file):
+            try:
+                os.remove(session_file)
+                logger.info(f"Session file removed for {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to remove session file for {user_id}: {str(e)}")
 
-    session_file = os.path.join(SESSIONS_DIR, f"{user_id}_session.session")
-    if os.path.exists(session_file):
-        try:
-            os.remove(session_file)
-        except Exception as e:
-            logger.error(f"Failed to remove session file: {str(e)}")
+        # إرسال إشعارات التحديث
+        socketio.emit('log_update', {
+            "message": f"🔄 تم إعادة تعيين جلسة تسجيل الدخول لـ {PREDEFINED_USERS[user_id]['name']}"
+        }, to=user_id)
 
-    socketio.emit('log_update', {
-        "message": "🔄 إعادة تعيين جلسة تسجيل الدخول"
-    }, to=user_id)
+        socketio.emit('connection_status', {
+            "status": "disconnected"
+        }, to=user_id)
+        
+        socketio.emit('login_status', {
+            "logged_in": False,
+            "connected": False,
+            "awaiting_code": False,
+            "awaiting_password": False,
+            "is_running": False
+        }, to=user_id)
 
-    socketio.emit('connection_status', {
-        "status": "disconnected"
-    }, to=user_id)
-
-    return jsonify({
-        "success": True, 
-        "message": "✅ تم إعادة التعيين"
-    })
+        logger.info(f"Login reset completed for user {user_id}")
+        
+        return jsonify({
+            "success": True, 
+            "message": f"✅ تم إعادة تعيين جلسة {PREDEFINED_USERS[user_id]['name']} بنجاح"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error resetting login for {user_id}: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"❌ خطأ في إعادة التعيين: {str(e)}"
+        })
 
 # =========================== 
 # Keep-Alive API
@@ -2005,76 +2088,6 @@ def api_system_health():
             "message": f"خطأ: {str(e)}"
         })
 
-# =========================== 
-# Admin API
-# ===========================
-@app.route("/api/admin/get_users", methods=["GET"])
-def api_admin_get_users():
-    if not session.get('is_admin'):
-        return jsonify({"success": False, "message": "غير مصرح"})
-
-    with USERS_LOCK:
-        users_data = {}
-        for user_id, data in USERS.items():
-            users_data[user_id] = {
-                'settings': data['settings'],
-                'is_running': data['is_running'],
-                'stats': data['stats'],
-                'connected': data.get('connected', False),
-                'authenticated': data.get('authenticated', False)
-            }
-
-    return jsonify({"success": True, "users": users_data})
-
-@app.route("/api/admin/stop_user/<user_id>", methods=["POST"])
-def api_admin_stop_user(user_id):
-    if not session.get('is_admin'):
-        return jsonify({"success": False, "message": "غير مصرح"})
-
-    with USERS_LOCK:
-        if user_id in USERS:
-            USERS[user_id]['is_running'] = False
-            return jsonify({
-                "success": True, 
-                "message": f"تم إيقاف المستخدم {user_id}"
-            })
-
-    return jsonify({"success": False, "message": "المستخدم غير موجود"})
-
-@app.route("/api/admin/get_admin_data", methods=["GET"])
-def api_admin_get_admin_data():
-    if not session.get('is_admin'):
-        return jsonify({"success": False, "message": "غير مصرح"})
-
-    with ADMIN_DATA_LOCK:
-        return jsonify({
-            "success": True,
-            "data": {
-                'used_links': ADMIN_DATA['used_links'],
-                'alerts_log': ADMIN_DATA['alerts_log'],
-                'stats': ADMIN_DATA['stats']
-            }
-        })
-
-@app.route("/api/admin/clear_admin_data", methods=["POST"])
-def api_admin_clear_admin_data():
-    if not session.get('is_admin'):
-        return jsonify({"success": False, "message": "غير مصرح"})
-
-    data_type = request.json.get('type', 'all')
-
-    with ADMIN_DATA_LOCK:
-        if data_type == 'links' or data_type == 'all':
-            ADMIN_DATA['used_links'] = []
-        if data_type == 'alerts' or data_type == 'all':
-            ADMIN_DATA['alerts_log'] = []
-        if data_type == 'all':
-            ADMIN_DATA['stats'] = {'total_messages': 0, 'total_alerts': 0}
-
-    return jsonify({
-        "success": True,
-        "message": f"تم مسح {'جميع البيانات' if data_type == 'all' else 'البيانات المحددة'}"
-    })
 
 # =========================== 
 # نظام الانضمام التلقائي للمجموعات
@@ -2271,7 +2284,14 @@ def api_extract_group_links():
 def api_join_group():
     """الانضمام لمجموعة واحدة"""
     try:
-        user_id = session['user_id']
+        user_id = session.get('user_id', 'user_1')
+        
+        if user_id not in PREDEFINED_USERS:
+            return jsonify({
+                "success": False,
+                "message": "❌ مستخدم غير صحيح"
+            })
+            
         data = request.json
 
         if not data or not data.get('group_link'):
@@ -2293,7 +2313,7 @@ def api_join_group():
             if user_id not in USERS:
                 return jsonify({
                     "success": False,
-                    "message": "❌ المستخدم غير مسجل"
+                    "message": f"❌ المستخدم {PREDEFINED_USERS[user_id]['name']} غير مسجل"
                 })
 
             client_manager = USERS[user_id].get('client_manager')
@@ -2320,6 +2340,145 @@ def api_join_group():
         return jsonify({
             "success": False,
             "message": f"❌ خطأ: {str(e)}"
+        })
+
+@app.route("/api/start_auto_join", methods=["POST"])
+def api_start_auto_join():
+    """بدء الانضمام التلقائي المتعدد للمجموعات"""
+    try:
+        user_id = session.get('user_id', 'user_1')
+        
+        if user_id not in PREDEFINED_USERS:
+            return jsonify({
+                "success": False,
+                "message": "❌ مستخدم غير صحيح"
+            })
+            
+        data = request.json
+        if not data or not data.get('links'):
+            return jsonify({
+                "success": False,
+                "message": "❌ لم يتم إرسال روابط المجموعات"
+            })
+
+        links = data.get('links', [])
+        delay = data.get('delay', 3)  # تأخير افتراضي 3 ثواني
+        
+        if not links:
+            return jsonify({
+                "success": False,
+                "message": "❌ لا توجد روابط للانضمام إليها"
+            })
+
+        with USERS_LOCK:
+            if user_id not in USERS:
+                return jsonify({
+                    "success": False,
+                    "message": f"❌ المستخدم {PREDEFINED_USERS[user_id]['name']} غير مسجل"
+                })
+
+            client_manager = USERS[user_id].get('client_manager')
+            if not client_manager or not client_manager.client:
+                return jsonify({
+                    "success": False,
+                    "message": "❌ يرجى تسجيل الدخول أولاً"
+                })
+
+        # بدء عملية الانضمام التلقائي في thread منفصل
+        import threading
+        
+        def auto_join_worker():
+            success_count = 0
+            fail_count = 0
+            already_joined_count = 0
+            
+            socketio.emit('log_update', {
+                "message": f"🚀 بدء الانضمام التلقائي لـ {len(links)} مجموعة..."
+            }, to=user_id)
+            
+            for i, link_obj in enumerate(links):
+                try:
+                    # الحصول على الرابط
+                    if isinstance(link_obj, dict):
+                        group_link = link_obj.get('url', '') or link_obj.get('link', '') or str(link_obj)
+                    else:
+                        group_link = str(link_obj)
+                    
+                    group_link = group_link.strip()
+                    
+                    # إرسال حالة التقدم
+                    socketio.emit('join_progress', {
+                        'current': i + 1,
+                        'total': len(links),
+                        'link': group_link
+                    }, to=user_id)
+                    
+                    # محاولة الانضمام
+                    result = client_manager.run_coroutine(
+                        join_telegram_group(client_manager.client, group_link)
+                    )
+                    
+                    if result['success']:
+                        if result.get('already_joined', False):
+                            already_joined_count += 1
+                            socketio.emit('log_update', {
+                                "message": f"ℹ️ منضم مسبقاً: {group_link}"
+                            }, to=user_id)
+                        else:
+                            success_count += 1
+                            socketio.emit('log_update', {
+                                "message": f"✅ تم الانضمام: {group_link}"
+                            }, to=user_id)
+                    else:
+                        fail_count += 1
+                        socketio.emit('log_update', {
+                            "message": f"❌ فشل: {group_link} - {result['message']}"
+                        }, to=user_id)
+                    
+                    # تحديث الإحصائيات
+                    socketio.emit('join_stats', {
+                        'success': success_count,
+                        'fail': fail_count,
+                        'already_joined': already_joined_count
+                    }, to=user_id)
+                    
+                    # تأخير بين المجموعات لتجنب flood
+                    if i < len(links) - 1:  # لا نؤخر بعد آخر مجموعة
+                        time.sleep(delay)
+                        
+                except Exception as e:
+                    fail_count += 1
+                    socketio.emit('log_update', {
+                        "message": f"❌ خطأ في {group_link}: {str(e)}"
+                    }, to=user_id)
+            
+            # إرسال النتيجة النهائية
+            socketio.emit('auto_join_completed', {
+                'success': success_count,
+                'fail': fail_count,
+                'already_joined': already_joined_count,
+                'total': len(links)
+            }, to=user_id)
+            
+            socketio.emit('log_update', {
+                "message": f"🎉 انتهى الانضمام التلقائي! النجح: {success_count}, فشل: {fail_count}, منضم مسبقاً: {already_joined_count}"
+            }, to=user_id)
+
+        # تشغيل العملية في thread منفصل
+        thread = threading.Thread(target=auto_join_worker, daemon=True)
+        thread.start()
+
+        return jsonify({
+            "success": True,
+            "message": f"✅ تم بدء الانضمام التلقائي لـ {len(links)} مجموعة",
+            "total_links": len(links)
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting auto join: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"❌ خطأ في بدء الانضمام التلقائي: {str(e)}"
         })
 
 # ==========================
