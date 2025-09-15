@@ -823,7 +823,7 @@ class TelegramManager:
             raise Exception(str(e))
 
     def send_message_with_media_async(self, user_id, entity, message, image_files):
-        """إرسال رسالة مع صور"""
+        """إرسال رسالة مع صور - طريقة محسنة"""
         try:
             with USERS_LOCK:
                 if user_id not in USERS:
@@ -854,28 +854,39 @@ class TelegramManager:
 
             results = []
 
-            # إرسال الرسالة النصية أولاً
-            if message:
-                text_result = client_manager.run_coroutine(
-                    client_manager.client.send_message(entity_obj, message)
-                )
-                results.append(text_result.id)
-
-            # إرسال الصور
-            for img_file in image_files:
-                try:
-                    media_result = client_manager.run_coroutine(
-                        client_manager.client.send_file(
-                            entity_obj, 
-                            img_file['path'],
-                            caption=f"📷 {img_file['name']}"
+            # إرسال الصور مع الرسالة النصية كـ caption للصورة الأولى
+            if image_files:
+                for i, img_file in enumerate(image_files):
+                    try:
+                        # للصورة الأولى نضع الرسالة النصية كـ caption
+                        caption = message if i == 0 and message else f"📷 {img_file['name']}"
+                        
+                        # التأكد من وجود الملف
+                        if not os.path.exists(img_file['path']):
+                            logger.error(f"Image file not found: {img_file['path']}")
+                            continue
+                            
+                        media_result = client_manager.run_coroutine(
+                            client_manager.client.send_file(
+                                entity_obj, 
+                                img_file['path'],
+                                caption=caption
+                            )
                         )
+                        results.append(media_result.id)
+                        logger.info(f"Successfully sent image {img_file['name']} to {entity}")
+                        
+                    except Exception as img_error:
+                        logger.error(f"Error sending image {img_file['name']}: {str(img_error)}")
+                        # نواصل مع الصور الأخرى حتى لو فشلت صورة واحدة
+                        continue
+            else:
+                # إذا لم تكن هناك صور، أرسل الرسالة النصية فقط
+                if message:
+                    text_result = client_manager.run_coroutine(
+                        client_manager.client.send_message(entity_obj, message)
                     )
-                    results.append(media_result.id)
-                except Exception as img_error:
-                    logger.error(f"Error sending image {img_file['name']}: {str(img_error)}")
-                    # نواصل مع الصور الأخرى حتى لو فشلت صورة واحدة
-                    continue
+                    results.append(text_result.id)
 
             return {"success": True, "message_ids": results}
 
@@ -1748,13 +1759,23 @@ def api_switch_user():
         
         old_user_id = session.get('user_id', 'user_1')
         
-        # التأكد من وجود بيانات المستخدم الجديد
+        # حفظ إعدادات المستخدم القديم إذا كان موجوداً
+        if old_user_id in USERS:
+            current_settings = USERS[old_user_id].get('settings', {})
+            if current_settings:
+                save_settings(old_user_id, current_settings)
+                logger.info(f"Settings saved for old user {old_user_id}")
+        
+        # التأكد من وجود بيانات المستخدم الجديد وتحميل إعداداته
         with USERS_LOCK:
             if new_user_id not in USERS:
-                # إنشاء بيانات فارغة للمستخدم الجديد
+                # تحميل الإعدادات المحفوظة للمستخدم الجديد
+                saved_settings = load_settings(new_user_id)
+                
+                # إنشاء بيانات للمستخدم الجديد مع الإعدادات المحفوظة
                 USERS[new_user_id] = {
                     'client_manager': None,
-                    'settings': load_settings(new_user_id),
+                    'settings': saved_settings,
                     'thread': None,
                     'is_running': False,
                     'stats': {"sent": 0, "errors": 0},
@@ -1766,12 +1787,26 @@ def api_switch_user():
                     'monitoring_active': False,
                     'event_handlers_registered': False
                 }
+                
+                # التحقق من وجود جلسة محفوظة للمستخدم الجديد
+                session_file = os.path.join(SESSIONS_DIR, f"{new_user_id}_session.session")
+                if os.path.exists(session_file) and saved_settings.get('phone'):
+                    USERS[new_user_id]['connected'] = True
+                    USERS[new_user_id]['authenticated'] = True
+                    logger.info(f"Found existing session for user {new_user_id}")
+            else:
+                # إعادة تحميل الإعدادات للمستخدم الموجود
+                saved_settings = load_settings(new_user_id)
+                USERS[new_user_id]['settings'].update(saved_settings)
         
         # تحديث الجلسة
         session['user_id'] = new_user_id
         session.permanent = True
         
         logger.info(f"User switched from {old_user_id} to {new_user_id} via API")
+        
+        # إرسال الإعدادات الخاصة بالمستخدم الجديد
+        socketio.emit('user_settings', USERS[new_user_id]['settings'], to=new_user_id)
         
         return jsonify({
             "success": True,
@@ -1781,7 +1816,8 @@ def api_switch_user():
                 "name": PREDEFINED_USERS[new_user_id]['name'],
                 "icon": PREDEFINED_USERS[new_user_id]['icon'],
                 "color": PREDEFINED_USERS[new_user_id]['color']
-            }
+            },
+            "settings": USERS[new_user_id]['settings']
         })
         
     except Exception as e:
@@ -2078,11 +2114,11 @@ def api_send_now():
             # تنظيف الملفات المؤقتة
             for img_file in image_files:
                 try:
-                    import os
                     if os.path.exists(img_file['path']):
                         os.unlink(img_file['path'])
+                        logger.info(f"Cleaned up temp file: {img_file['name']}")
                 except Exception as e:
-                    logger.error(f"Error cleaning temp file: {str(e)}")
+                    logger.error(f"Error cleaning temp file {img_file.get('name', 'unknown')}: {str(e)}")
 
     threading.Thread(target=send_messages_with_images, daemon=True).start()
 

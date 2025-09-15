@@ -99,10 +99,17 @@ function initializeSocket() {
             updateUserTabs(data.current_user);
         });
 
+        // عند نجاح التبديل
         socket.on('user_switched', function(data) {
             currentUserId = data.current_user;
             updateUserTabs(data.current_user);
             showNotification(data.message, 'success');
+
+            // تحديث الإعدادات فوراً
+            if (data.settings) {
+                updateFormFields(data.settings);
+            }
+
             setTimeout(() => window.location.reload(), 1000);
         });
 
@@ -907,27 +914,68 @@ function updateUserTabs(activeUserId) {
     });
 }
 
+// دالة تحديث حقول النموذج بإعدادات المستخدم
 function updateFormFields(settings) {
     try {
-        // تحديث حقول النموذج بإعدادات المستخدم
-        const fields = {
-            'phone': settings.phone,
-            'message': settings.message,
-            'groups': settings.groups?.join('\n'),
-            'watchWords': settings.watch_words?.join('\n'),
-            'sendType': settings.send_type,
-            'intervalSeconds': settings.interval_seconds
-        };
+        console.log('🔄 Updating form fields with settings:', settings);
 
-        for (const [fieldId, value] of Object.entries(fields)) {
-            const field = document.getElementById(fieldId);
-            if (field && value) {
-                field.value = value;
+        // تحديث رقم الهاتف
+        const phoneField = document.getElementById('phone');
+        if (phoneField) {
+            phoneField.value = settings.phone || '';
+        }
+
+        // تحديث الرسالة
+        const messageField = document.getElementById('message');
+        if (messageField) {
+            messageField.value = settings.message || '';
+        }
+
+        // تحديث المجموعات
+        const groupsField = document.getElementById('groups');
+        if (groupsField) {
+            if (Array.isArray(settings.groups)) {
+                groupsField.value = settings.groups.join('\n');
+            } else {
+                groupsField.value = settings.groups || '';
             }
         }
 
+        // تحديث كلمات المراقبة
+        const watchWordsField = document.getElementById('watchWords');
+        if (watchWordsField) {
+            if (Array.isArray(settings.watch_words)) {
+                watchWordsField.value = settings.watch_words.join('\n');
+            } else {
+                watchWordsField.value = settings.watch_words || '';
+            }
+        }
+
+        // تحديث نوع الإرسال
+        const sendTypeField = document.getElementById('sendType');
+        if (sendTypeField) {
+            sendTypeField.value = settings.send_type || 'manual';
+        }
+
+        // تحديث فترة الإرسال
+        const intervalField = document.getElementById('intervalSeconds');
+        if (intervalField) {
+            intervalField.value = settings.interval_seconds || 3600;
+        }
+
+        // تحديث الوقت المجدول
+        const scheduledTimeField = document.getElementById('scheduledTime');
+        if (scheduledTimeField) {
+            scheduledTimeField.value = settings.scheduled_time || '';
+        }
+
+        // تطبيق تغيير نوع الإرسال
+        handleSendTypeChange();
+
+        console.log('✅ Form fields updated successfully');
+
     } catch (error) {
-        console.error('Error updating form fields:', error);
+        console.error('❌ Error updating form fields:', error);
     }
 }
 
@@ -1123,7 +1171,7 @@ function initializePWA() {
     // معالجة حدث التثبيت
     window.addEventListener('beforeinstallprompt', function(e) {
         e.preventDefault();
-        // deferredPrompt = e; // This line was removed as it was a duplicate declaration
+        deferredPrompt = e; 
 
         const installBtn = document.getElementById('installAppBtn');
         if (installBtn) {
@@ -1134,7 +1182,6 @@ function initializePWA() {
 }
 
 function installApp() {
-    // This function relies on the deferredPrompt variable which is now declared only once in initializePWA
     if (!deferredPrompt) {
         showNotification('التطبيق مثبت بالفعل أو غير متاح للتثبيت', 'info');
         return;
