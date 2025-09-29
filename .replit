@@ -19,16 +19,20 @@ task = "workflow.run"
 args = "Telegram Monitor Server"
 
 [[workflows.workflow]]
-name = "Telegram Monitor Server"
+name = "app_fixed.py"
 author = "agent"
+mode = "parallel"
 
 [workflows.workflow.metadata]
 outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python app.py"
-waitForPort = 5000
+args = "python app_fixed.py"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python app_fixed.py"
 
 [[workflows.workflow]]
 name = "Telegram Monitor Server Fixed"
