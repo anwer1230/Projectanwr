@@ -14,6 +14,7 @@ from telethon import TelegramClient, events, functions
 from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError, PasswordHashInvalidError, FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError, InviteHashInvalidError
 from telethon.sessions import StringSession
 import socket
+from datetime import datetime  # Added for learning bot
 
 # تكوين السجلات المحسن
 logging.basicConfig(
@@ -495,6 +496,10 @@ class TelegramClientManager:
         if self.thread:
             self.thread.join(timeout=5)
 
+# =========================== 
+# دوال إضافية للإرسال المتسلسل والانضمام المتعدد (سيتم إلحاقها لاحقاً)
+# ===========================
+
 def get_all_users_operations_status():
     """الحصول على حالة العمليات لجميع المستخدمين"""
     operations_status = {}
@@ -543,28 +548,6 @@ def notify_user_about_background_operations(user_id):
 
     except Exception as e:
         logger.error(f"Error notifying about background operations: {str(e)}")
-
-def update_monitoring_settings(self, keywords, groups):
-    """تحديث إعدادات المراقبة - فقط الكلمات المفتاحية (المجموعات للإرسال فقط)"""
-    self.monitored_keywords = [k.strip() for k in keywords if k.strip()]
-    # ⚠️ لا نحفظ مجموعات المراقبة - نراقب كل شيء
-    # نحفظ مجموعات الإرسال منفصلة في الإعدادات العادية
-
-    logger.info(f"Updated monitoring settings for {self.user_id}: {len(self.monitored_keywords)} keywords - مراقبة شاملة لكامل الحساب")
-
-def run_coroutine(self, coro):
-    """تشغيل coroutine في event loop الخاص بالعميل"""
-    if not self.loop:
-        raise Exception("Event loop not initialized")
-
-    future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-    return future.result(timeout=30)
-
-def stop(self):
-    """إيقاف العميل"""
-    self.stop_flag.set()
-    if self.thread:
-        self.thread.join(timeout=5)
 
 # =========================== 
 # مدير التليجرام الرئيسي
@@ -3251,6 +3234,431 @@ async def search_public_telegram(client, query, limit=50):
     results.sort(key=lambda x: x.get('participants_count', 0), reverse=True)
 
     return results[:limit]
+
+# ===========================
+# 1. الإرسال المتسلسل (Rotating Send)
+# ===========================
+
+# إضافة دوال داخل TelegramClientManager (سنقوم بتمديد الكلاس)
+def patch_telegram_client_manager():
+    """إضافة دوال الإرسال المتسلسل إلى TelegramClientManager"""
+    if not hasattr(TelegramClientManager, 'start_rotating'):
+        def start_rotating(self, groups, messages, interval_minutes):
+            """بدء الإرسال المتسلسل"""
+            if hasattr(self, 'rotating_thread') and self.rotating_thread and self.rotating_thread.is_alive():
+                self.stop_rotating()
+            self.rotating_stop = threading.Event()
+            self.rotating_messages = [msg for msg in messages if msg and msg.strip()]
+            self.rotating_groups = groups
+            self.rotating_interval = max(1, interval_minutes)
+            self.rotating_index = 0
+            self.rotating_thread = threading.Thread(target=self._rotating_worker, daemon=True)
+            self.rotating_thread.start()
+            logger.info(f"Rotating send started for user {self.user_id}")
+
+        def stop_rotating(self):
+            """إيقاف الإرسال المتسلسل"""
+            if hasattr(self, 'rotating_stop'):
+                self.rotating_stop.set()
+            self.rotating_thread = None
+            logger.info(f"Rotating send stopped for user {self.user_id}")
+
+        def _rotating_worker(self):
+            """حلقة الإرسال المتسلسل"""
+            valid_messages = self.rotating_messages
+            if not valid_messages:
+                return
+            index = 0
+            # التحويل إلى ثواني مع حد أدنى 60 ثانية
+            sleep_seconds = max(60, self.rotating_interval * 60)
+            while not self.rotating_stop.is_set():
+                current_msg = valid_messages[index % len(valid_messages)]
+                # إرسال الرسالة إلى جميع المجموعات
+                try:
+                    self.run_coroutine(self._send_rotating_message(self.rotating_groups, current_msg))
+                except Exception as e:
+                    logger.error(f"Rotating send error: {e}")
+                index += 1
+                # انتظار مع إمكانية الإيقاف المبكر
+                for _ in range(sleep_seconds):
+                    if self.rotating_stop.is_set():
+                        break
+                    time.sleep(1)
+
+        async def _send_rotating_message(self, groups, message):
+            """إرسال رسالة دورية إلى مجموعات متعددة"""
+            for group in groups:
+                try:
+                    entity = await self.client.get_entity(group)
+                    await self.client.send_message(entity, message)
+                    logger.info(f"Rotating send: message sent to {group}")
+                except Exception as e:
+                    logger.error(f"Rotating send failed to {group}: {e}")
+                await asyncio.sleep(3)  # تأخير قصير بين المجموعات
+
+        TelegramClientManager.start_rotating = start_rotating
+        TelegramClientManager.stop_rotating = stop_rotating
+        TelegramClientManager._rotating_worker = _rotating_worker
+        TelegramClientManager._send_rotating_message = _send_rotating_message
+
+patch_telegram_client_manager()
+
+# نهايات API للإرسال المتسلسل
+@app.route("/api/rotating/save", methods=["POST"])
+def api_rotating_save():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    data = request.json
+    messages = data.get("messages", [])
+    groups = data.get("groups", [])
+    interval = int(data.get("interval", 5))
+    settings = load_settings(user_id)
+    settings["rotating_messages"] = messages
+    settings["rotating_groups"] = groups
+    settings["rotating_interval"] = interval
+    if save_settings(user_id, settings):
+        return jsonify({"success": True, "message": "تم حفظ إعدادات الإرسال المتسلسل"})
+    return jsonify({"success": False, "message": "فشل الحفظ"})
+
+@app.route("/api/rotating/start", methods=["POST"])
+def api_rotating_start():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    with USERS_LOCK:
+        if user_id not in USERS:
+            return jsonify({"success": False, "message": "المستخدم غير موجود"})
+        cm = USERS[user_id].get('client_manager')
+        if not cm or not cm.client:
+            return jsonify({"success": False, "message": "العميل غير متصل"})
+        settings = load_settings(user_id)
+        groups = settings.get("rotating_groups", [])
+        messages = settings.get("rotating_messages", [])
+        interval = settings.get("rotating_interval", 5)
+        if not groups or not messages:
+            return jsonify({"success": False, "message": "يرجى حفظ المجموعات والرسائل أولاً"})
+        cm.start_rotating(groups, messages, interval)
+        return jsonify({"success": True, "message": "بدأ الإرسال المتسلسل"})
+
+@app.route("/api/rotating/stop", methods=["POST"])
+def api_rotating_stop():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    with USERS_LOCK:
+        if user_id in USERS:
+            cm = USERS[user_id].get('client_manager')
+            if cm:
+                cm.stop_rotating()
+    return jsonify({"success": True, "message": "تم إيقاف الإرسال المتسلسل"})
+
+# ===========================
+# 2. الانضمام التلقائي المحسن (Bulk Join with Progress)
+# ===========================
+
+# دوال مساعدة لاستخراج الروابط بشكل متقدم
+def parse_telegram_entities(raw_text):
+    """استخراج جميع أنواع روابط التليجرام من النص الخام"""
+    import re
+    entities = []
+    seen = set()
+    # روابط دعوة t.me/+
+    for m in re.findall(r'https?://t\.me/\+([A-Za-z0-9_-]+)', raw_text):
+        key = f"+{m}"
+        if key not in seen:
+            seen.add(key)
+            entities.append({"entity": key, "kind": "invite", "label": f"دعوة: {key[:15]}..."})
+    # روابط joinchat
+    for m in re.findall(r'https?://t\.me/joinchat/([A-Za-z0-9_-]+)', raw_text):
+        key = m
+        if key not in seen:
+            seen.add(key)
+            entities.append({"entity": key, "kind": "invite", "label": f"دعوة: {key[:15]}..."})
+    # روابط عادية t.me/username
+    for m in re.findall(r'https?://t\.me/([A-Za-z][A-Za-z0-9_]{3,})', raw_text):
+        key = m
+        if key not in seen:
+            seen.add(key)
+            entities.append({"entity": f"@{key}", "kind": "username", "label": f"@{key}"})
+    # معرفات رقمية (مثل -1001234567890)
+    for m in re.findall(r'(?<!\d)(-100\d{9,})(?!\d)', raw_text):
+        key = m
+        if key not in seen:
+            seen.add(key)
+            entities.append({"entity": key, "kind": "id", "label": f"ID: {key}"})
+    # أسماء مستخدمين بدون رابط
+    for m in re.findall(r'@([A-Za-z0-9_]{5,})', raw_text):
+        key = m
+        if key not in seen:
+            seen.add(key)
+            entities.append({"entity": f"@{key}", "kind": "username", "label": f"@{key}"})
+    return entities
+
+@app.route("/api/parse_join_links", methods=["POST"])
+def api_parse_join_links():
+    data = request.json
+    raw = data.get("raw", "")
+    links = parse_telegram_entities(raw)
+    return jsonify({"success": True, "links": links})
+
+# إضافة دوال الانضمام المتعدد داخل TelegramClientManager (إذا لم تكن موجودة)
+if not hasattr(TelegramClientManager, 'bulk_join'):
+    async def _join_single_group(self, entity_str):
+        from telethon import functions
+        entity_str = entity_str.strip()
+        if entity_str.startswith('+') or 'joinchat/' in entity_str:
+            # رابط دعوة
+            hash_part = entity_str.lstrip('+').split('joinchat/')[-1]
+            await self.client(functions.messages.ImportChatInviteRequest(hash=hash_part))
+        else:
+            # اسم مستخدم أو معرف
+            if entity_str.lstrip('-').isdigit():
+                # معرف رقمي
+                entity = await self.client.get_entity(int(entity_str))
+            else:
+                username = entity_str.lstrip('@')
+                entity = await self.client.get_entity(f"@{username}")
+            await self.client(functions.channels.JoinChannelRequest(entity))
+
+    async def bulk_join(self, links, progress_callback=None):
+        ok = skip = fail = 0
+        total = len(links)
+        for i, item in enumerate(links):
+            entity_str = item.get('entity', '').strip()
+            label = item.get('label', entity_str)
+            try:
+                await self._join_single_group(entity_str)
+                ok += 1
+                if progress_callback:
+                    await progress_callback(i+1, total, ok, skip, fail, label, 'success')
+            except Exception as e:
+                err = str(e)
+                if 'Already' in err or 'USER_ALREADY_PARTICIPANT' in err:
+                    skip += 1
+                    if progress_callback:
+                        await progress_callback(i+1, total, ok, skip, fail, label, 'skip')
+                else:
+                    fail += 1
+                    if progress_callback:
+                        await progress_callback(i+1, total, ok, skip, fail, label, 'fail', str(e))
+            await asyncio.sleep(1.5)
+        return ok, skip, fail
+
+    TelegramClientManager._join_single_group = _join_single_group
+    TelegramClientManager.bulk_join = bulk_join
+
+@app.route("/api/bulk_join", methods=["POST"])
+def api_bulk_join():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    data = request.json
+    links = data.get("links", [])
+    if not links:
+        return jsonify({"success": False, "message": "لا توجد روابط"})
+    with USERS_LOCK:
+        if user_id not in USERS:
+            return jsonify({"success": False, "message": "المستخدم غير موجود"})
+        cm = USERS[user_id].get('client_manager')
+        if not cm or not cm.client:
+            return jsonify({"success": False, "message": "العميل غير متصل"})
+
+    async def progress_callback(current, total, ok, skip, fail, label, status, error=None):
+        socketio.emit('join_progress', {
+            'current': current, 'total': total, 'ok': ok, 'skip': skip, 'fail': fail,
+            'current_label': label, 'status': status, 'error': error
+        }, to=user_id)
+
+    async def do_join():
+        nonlocal ok, skip, fail  # تعريف المتغيرات في النطاق العلوي
+        ok, skip, fail = await cm.bulk_join(links, progress_callback)
+        socketio.emit('bulk_join_done', {'ok': ok, 'skip': skip, 'fail': fail}, to=user_id)
+
+    def run_async():
+        cm.run_coroutine(do_join())
+    threading.Thread(target=run_async, daemon=True).start()
+    return jsonify({"success": True, "message": "بدأ الانضمام التلقائي"})
+
+# ===========================
+# 3. البوت التعليمي (Learning Bot)
+# ===========================
+
+# تخزين البوتات لكل مستخدم
+learning_bots = {}
+def get_learning_bot(user_id):
+    if user_id not in learning_bots:
+        learning_bots[user_id] = LearningBot(user_id)
+    return learning_bots[user_id]
+
+class LearningBot:
+    def __init__(self, user_id, client=None):
+        self.user_id = user_id
+        self.client = client
+        self.is_monitoring = False
+        self.reply_in_groups = False
+        self.knowledge = self.load_knowledge()
+        self.unknown_requests = []
+        self.quick_replies = [
+            (r'\b(واجب|حل واجب|مسألة)\b', 'ابشر ارسل الواجب'),
+            (r'\b(مشروع|تقرير|بحث)\b', 'هات العنوان والمتطلبات'),
+            (r'\b(تلخيص|ملخص)\b', 'ارسل النص الذي تريد تلخيصه'),
+        ]
+
+    def load_knowledge(self):
+        path = os.path.join(SESSIONS_DIR, f"{self.user_id}_knowledge.json")
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {
+            "حل واجب": {"description": "حل الواجبات المنزلية", "intent_keywords": ["حل", "واجب"]},
+            "بحث": {"description": "إعداد البحوث والتقارير", "intent_keywords": ["بحث", "تقرير"]}
+        }
+
+    def save_knowledge(self):
+        path = os.path.join(SESSIONS_DIR, f"{self.user_id}_knowledge.json")
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.knowledge, f, ensure_ascii=False)
+
+    def set_client(self, client):
+        self.client = client
+        self.register_handlers()
+
+    def register_handlers(self):
+        if not self.client:
+            return
+        @self.client.on(events.NewMessage)
+        async def handler(event):
+            if not self.is_monitoring:
+                return
+            await self.handle_message(event)
+        logger.info(f"Learning bot handlers registered for user {self.user_id}")
+
+    async def handle_message(self, event):
+        text = event.message.text
+        if not text or len(text) < 3:
+            return
+        sender = await event.get_sender()
+        sender_name = getattr(sender, 'first_name', '') or 'مستخدم'
+        is_group = event.is_group
+
+        # ردود سريعة
+        for pattern, reply in self.quick_replies:
+            if re.search(pattern, text, re.IGNORECASE):
+                if is_group and not self.reply_in_groups:
+                    return
+                await event.reply(reply)
+                return
+
+        # كشف الخدمة
+        service = self.detect_service(text)
+        if service:
+            await self.send_reply(event, service)
+        else:
+            # طلب غير معروف
+            self.unknown_requests.append({
+                "text": text[:100],
+                "sender": sender_name,
+                "time": datetime.now().isoformat()
+            })
+            socketio.emit('new_unknown', self.unknown_requests[-1], to=self.user_id)
+
+    def detect_service(self, text):
+        text_low = text.lower()
+        best_match = None
+        best_score = 0
+        for service, data in self.knowledge.items():
+            for kw in data.get("intent_keywords", []):
+                if kw in text_low:
+                    score = len(kw)
+                    if score > best_score:
+                        best_score = score
+                        best_match = service
+        return best_match
+
+    async def send_reply(self, event, service):
+        replies = {
+            "حل واجب": "ابشر ارسل الواجب وسأقوم بحله",
+            "بحث": "هات عنوان البحث والمتطلبات",
+            "تلخيص": "ارسل النص الذي تريد تلخيصه"
+        }
+        reply_text = replies.get(service, self.knowledge.get(service, {}).get("description", "كيف يمكنني مساعدتك؟"))
+        await event.reply(reply_text)
+
+    def add_service(self, name, description, keywords):
+        self.knowledge[name] = {
+            "description": description,
+            "intent_keywords": keywords
+        }
+        self.save_knowledge()
+
+    def get_unknown_requests(self):
+        return self.unknown_requests
+
+    def clear_unknown(self):
+        self.unknown_requests = []
+
+    def start_monitoring(self, reply_in_groups=False):
+        self.is_monitoring = True
+        self.reply_in_groups = reply_in_groups
+        if self.client:
+            self.register_handlers()
+        logger.info(f"Learning bot started for user {self.user_id}")
+
+    def stop_monitoring(self):
+        self.is_monitoring = False
+        logger.info(f"Learning bot stopped for user {self.user_id}")
+
+# دوال API للبوت التعليمي
+@app.route("/api/learning/teach", methods=["POST"])
+def api_teach():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    data = request.json
+    service = data.get("service")
+    description = data.get("description", "")
+    keywords = data.get("keywords", [service])
+    if not service:
+        return jsonify({"success": False, "message": "يرجى إدخال اسم الخدمة"})
+    bot = get_learning_bot(user_id)
+    bot.add_service(service, description, keywords)
+    return jsonify({"success": True, "message": f"تم تعليم الخدمة '{service}'"})
+
+@app.route("/api/learning/unknown", methods=["GET"])
+def api_unknown():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    bot = get_learning_bot(user_id)
+    return jsonify({"success": True, "requests": bot.get_unknown_requests()})
+
+@app.route("/api/learning/start", methods=["POST"])
+def api_learning_start():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    data = request.json
+    reply_in_groups = data.get("reply_in_groups", False)
+    with USERS_LOCK:
+        if user_id not in USERS:
+            return jsonify({"success": False, "message": "المستخدم غير موجود"})
+        cm = USERS[user_id].get('client_manager')
+        if not cm or not cm.client:
+            return jsonify({"success": False, "message": "العميل غير متصل"})
+    bot = get_learning_bot(user_id)
+    bot.set_client(cm.client)
+    bot.start_monitoring(reply_in_groups)
+    return jsonify({"success": True, "message": "بدء البوت التعليمي"})
+
+@app.route("/api/learning/stop", methods=["POST"])
+def api_learning_stop():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "الرجاء تسجيل الدخول"})
+    bot = get_learning_bot(user_id)
+    bot.stop_monitoring()
+    return jsonify({"success": True, "message": "إيقاف البوت التعليمي"})
 
 # بدء نظام التنبيهات عند تشغيل التطبيق
 alert_queue.start()
